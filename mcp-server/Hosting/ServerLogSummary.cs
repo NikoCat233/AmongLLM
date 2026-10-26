@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Encodings.Web;
 using System.Text.RegularExpressions;
 
 namespace AmongLLM.Server.Hosting;
@@ -7,7 +8,33 @@ public static partial class ServerLogSummary
 {
     private const int MaximumSummaryLength = 768;
     private const int MaximumPropertyCount = 12;
+    private const int MaximumSafeTextLength = 192;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions LogStringJson = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+    private static readonly HashSet<string> SafeNumericProperties = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "targetNetId", "callId", "targetClientId", "netObjectId", "instanceId", "x", "y", "textBoxInstanceId",
+        "afterSequence", "limit", "timeoutMs", "milliseconds", "frame"
+    };
+    private static readonly Dictionary<string, HashSet<string>> SafeEnumProperties = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["sendOption"] = new(StringComparer.OrdinalIgnoreCase) { "Reliable", "Unreliable" },
+        ["mode"] = new(StringComparer.OrdinalIgnoreCase) { "rpc", "raw" },
+        ["state"] = new(StringComparer.OrdinalIgnoreCase) { "foreground", "restore", "background" },
+        ["kind"] = new(StringComparer.OrdinalIgnoreCase) { "click", "wait", "waitForButton" }
+    };
+    private static readonly HashSet<string> RpcNumericTypes = new(StringComparer.Ordinal)
+    {
+        "byte", "sbyte", "int16", "uint16", "int32", "uint32", "packedInt32", "packedUInt32", "float"
+    };
+    private static readonly HashSet<string> SafeStringProperties = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "screenId", "buttonId", "member", "name", "path", "labelContains"
+    };
+    private static readonly HashSet<string> SafeStringArrayProperties = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "members", "levels", "sources"
+    };
 
     private static readonly HashSet<string> SafeBooleanResults = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -20,10 +47,17 @@ public static partial class ServerLogSummary
     };
 
     public static string SummarizePayload(object payload)
+        => SummarizePayload(null, payload);
+
+    public static string SummarizePayload(string? operation, object payload)
     {
         try
         {
             var element = JsonSerializer.SerializeToElement(payload, Json);
+            if (operation is "send_rpc" or "send_hazel_message")
+                return Bound(SummarizeHazelPayload(element, operation == "send_rpc"));
+            if (operation == "snap_to")
+                return Bound(SummarizeSnapToPayload(element));
             return Bound(DescribeShape(element, null, 0));
         }
         catch
@@ -49,10 +83,8 @@ public static partial class ServerLogSummary
         if (result.ValueKind == JsonValueKind.Object)
         {
             var safeFields = new List<string>();
-            var keyCount = 0;
             foreach (var property in result.EnumerateObject())
             {
-                keyCount++;
                 if (IsSensitiveName(property.Name))
                     continue;
                 if (SafeBooleanResults.Contains(property.Name) && property.Value.ValueKind is JsonValueKind.True or JsonValueKind.False)
@@ -60,8 +92,8 @@ public static partial class ServerLogSummary
                 else if (SafeNumericResults.Contains(property.Name) && property.Value.ValueKind == JsonValueKind.Number && property.Value.TryGetInt64(out var number))
                     safeFields.Add($"{property.Name}={number}");
             }
-            var known = safeFields.Count == 0 ? "none" : string.Join(",", safeFields.Take(MaximumPropertyCount));
-            return Bound($"object; keyCount={keyCount}; safeFields={known}");
+            var known = safeFields.Count == 0 ? "object; values omitted" : string.Join(", ", safeFields.Take(MaximumPropertyCount));
+            return Bound(known);
         }
 
         return result.ValueKind switch
@@ -80,8 +112,126 @@ public static partial class ServerLogSummary
         if (string.IsNullOrWhiteSpace(value))
             return "none";
 
-        var singleLine = value.Replace('\r', ' ').Replace('\n', ' ').Replace('\t', ' ');
-        return Bound(SensitiveValuePattern().Replace(singleLine, "$1[REDACTED]"));
+        var redacted = SensitiveValuePattern().Replace(value, "$1[REDACTED]");
+        redacted = BearerTokenPattern().Replace(redacted, "Bearer [REDACTED]");
+        return Bound(EscapeControlCharacters(redacted));
+    }
+
+    private static string SummarizeSnapToPayload(JsonElement payload)
+    {
+        var fields = new List<string>();
+        AddSafeNumber(payload, "netObjectId", fields);
+        AddSafeNumber(payload, "x", fields);
+        AddSafeNumber(payload, "y", fields);
+        return fields.Count == 0 ? "snap_to parameters unavailable" : string.Join("; ", fields);
+    }
+
+    private static string SummarizeHazelPayload(JsonElement payload, bool isSendRpc)
+    {
+        var fields = new List<string>();
+        if (!isSendRpc && payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty("mode", out var mode) && mode.ValueKind == JsonValueKind.String)
+            fields.Add($"mode={SanitizeText(mode.GetString())}");
+
+        AddSafeNumber(payload, "targetNetId", fields);
+        AddSafeNumber(payload, "callId", fields);
+        AddSafeEnum(payload, "sendOption", fields);
+        AddSafeNumber(payload, "targetClientId", fields);
+
+        var fieldsValue = payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty("fields", out var fieldArray) && fieldArray.ValueKind == JsonValueKind.Array
+            ? fieldArray
+            : default;
+        if (fieldsValue.ValueKind == JsonValueKind.Array)
+            fields.Add($"fields=[{SummarizeRpcFields(fieldsValue)}]");
+        else
+            fields.Add("fields=unavailable");
+
+        return string.Join("; ", fields);
+    }
+
+    private static string SummarizeRpcFields(JsonElement fields)
+    {
+        var summaries = new List<string>();
+        var count = 0;
+        foreach (var field in fields.EnumerateArray())
+        {
+            if (summaries.Count < MaximumPropertyCount)
+                summaries.Add(SummarizeRpcField(field, count));
+            count++;
+        }
+
+        if (count > summaries.Count)
+            summaries.Add($"+{count - summaries.Count} more");
+        return string.Join(", ", summaries);
+    }
+
+    private static string SummarizeRpcField(JsonElement field, int index)
+    {
+        if (field.ValueKind != JsonValueKind.Object || !field.TryGetProperty("type", out var typeValue) || typeValue.ValueKind != JsonValueKind.String)
+            return $"field#{index}=invalid";
+
+        var type = SanitizeText(typeValue.GetString());
+        if (typeValue.GetString() == "start")
+        {
+            if (field.TryGetProperty("tag", out var tag) && tag.ValueKind == JsonValueKind.Number && tag.TryGetByte(out var tagNumber))
+                return $"start(tag={tagNumber})";
+            return "start(tag=unknown)";
+        }
+        if (typeValue.GetString() == "end")
+            return "end";
+        if (!field.TryGetProperty("value", out var value))
+            return $"{type}=missing";
+
+        if (typeValue.GetString() == "bool" && value.ValueKind is JsonValueKind.True or JsonValueKind.False)
+            return $"bool={value.GetBoolean().ToString().ToLowerInvariant()}";
+        if (RpcNumericTypes.Contains(typeValue.GetString() ?? "") && value.ValueKind == JsonValueKind.Number)
+            return $"{type}={value.GetRawText()}";
+        if (typeValue.GetString() == "vector2" && TryReadVector2(value, out var x, out var y))
+            return $"vector2=({FormatNumber(x)},{FormatNumber(y)})";
+        if (typeValue.GetString() == "string" && value.ValueKind == JsonValueKind.String)
+        {
+            return $"string={FormatSafeString(value.GetString())}";
+        }
+        if (typeValue.GetString() == "bytes" && value.ValueKind == JsonValueKind.String)
+            return $"bytes=<omitted; base64Chars={(value.GetString() ?? "").Length}>";
+        return $"{type}=omitted";
+    }
+
+    private static bool TryReadVector2(JsonElement value, out float x, out float y)
+    {
+        x = y = 0;
+        return value.ValueKind == JsonValueKind.Object &&
+            value.TryGetProperty("x", out var xValue) && xValue.TryGetSingle(out x) && float.IsFinite(x) &&
+            value.TryGetProperty("y", out var yValue) && yValue.TryGetSingle(out y) && float.IsFinite(y);
+    }
+
+    private static string FormatNumber(float value) => value.ToString("G", System.Globalization.CultureInfo.InvariantCulture);
+
+    private static void AddSafeNumber(JsonElement value, string name, List<string> fields)
+    {
+        if (value.ValueKind == JsonValueKind.Object && value.TryGetProperty(name, out var property) &&
+            SafeNumericProperties.Contains(name) && property.ValueKind == JsonValueKind.Number)
+            fields.Add($"{name}={property.GetRawText()}");
+    }
+
+    private static void AddSafeEnum(JsonElement value, string name, List<string> fields)
+    {
+        if (value.ValueKind != JsonValueKind.Object || !value.TryGetProperty(name, out var property) || property.ValueKind != JsonValueKind.String ||
+            !SafeEnumProperties.TryGetValue(name, out var allowed) || property.GetString() is not { } text || !allowed.Contains(text))
+            return;
+        fields.Add($"{name}={text}");
+    }
+
+    private static string EscapeControlCharacters(string value)
+    {
+        var builder = new System.Text.StringBuilder(value.Length);
+        foreach (var character in value)
+        {
+            if (char.IsControl(character))
+                builder.Append($"\\u{(int)character:X4}");
+            else
+                builder.Append(character);
+        }
+        return builder.ToString();
     }
 
     private static string SummarizeGameLogs(JsonElement result)
@@ -101,6 +251,15 @@ public static partial class ServerLogSummary
     {
         if (propertyName is not null && IsSensitiveName(propertyName))
             return "redacted";
+        if (propertyName is not null && SafeNumericProperties.Contains(propertyName) && value.ValueKind == JsonValueKind.Number)
+            return value.GetRawText();
+        if (propertyName is not null && SafeStringProperties.Contains(propertyName) && value.ValueKind == JsonValueKind.String)
+            return FormatSafeString(value.GetString());
+        if (propertyName is not null && SafeStringArrayProperties.Contains(propertyName) && value.ValueKind == JsonValueKind.Array)
+            return DescribeSafeStringArray(value);
+        if (propertyName is not null && SafeEnumProperties.TryGetValue(propertyName, out var allowed) && value.ValueKind == JsonValueKind.String &&
+            value.GetString() is { } enumValue && allowed.Contains(enumValue))
+            return enumValue;
         if (depth >= 4)
             return DescribeKind(value);
 
@@ -131,6 +290,25 @@ public static partial class ServerLogSummary
         }
 
         return DescribeKind(value);
+    }
+
+    private static string DescribeSafeStringArray(JsonElement value)
+    {
+        var items = new List<string>();
+        var count = value.GetArrayLength();
+        foreach (var item in value.EnumerateArray().Take(6))
+            items.Add(item.ValueKind == JsonValueKind.String ? FormatSafeString(item.GetString()) : DescribeKind(item));
+        var suffix = count > items.Count ? $",+{count - items.Count} more" : "";
+        return $"array(count={count};values=[{string.Join(",", items)}{suffix}])";
+    }
+
+    private static string FormatSafeString(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return "\"\"";
+        if (IsSensitiveName(value))
+            return "[redacted]";
+        return JsonSerializer.Serialize(Bound(SanitizeText(value), MaximumSafeTextLength), LogStringJson);
     }
 
     private static int GetKeyCount(JsonElement value) =>
@@ -187,4 +365,7 @@ public static partial class ServerLogSummary
 
     [GeneratedRegex("(?i)((?:token|auth(?:orization)?|secret|password|api[_ -]?key)\\b[^:=]{0,16}[:=]\\s*)(?:Bearer\\s+)?[^\\s,;]+")]
     private static partial Regex SensitiveValuePattern();
+
+    [GeneratedRegex("(?i)\\bBearer\\s+[A-Za-z0-9._~+/-]{8,}={0,2}")]
+    private static partial Regex BearerTokenPattern();
 }

@@ -4,7 +4,7 @@ Among Us 游戏控制桥：一个本机 HTTP MCP server，以及与之配套的 
 
 ## 构建和运行
 
-需要 .NET 10 SDK。游戏插件目标为安装内的 .NET 6 / BepInEx IL2CPP，并使用实际游戏生成的 interop DLL。
+需要 .NET 10 SDK；完整测试还需要本机安装 .NET 6 运行时。游戏插件目标为安装内的 .NET 6 / BepInEx IL2CPP，并使用实际游戏生成的 interop DLL。
 
 ```powershell
 ./scripts/Build.ps1 -GamePath D:\Game\20260929
@@ -13,7 +13,9 @@ Among Us 游戏控制桥：一个本机 HTTP MCP server，以及与之配套的 
 
 `artifacts/AmongLLM-game-plugin.zip` 是安装包：将其中的 `BepInEx` 文件夹合并到游戏目录。包中保留 Roslyn 等托管依赖。构建脚本只生成安装包；安装后的插件在游戏启动时自动接入服务。
 
-默认地址是 `http://127.0.0.1:26767/mcp`，端口被占用时服务自动尝试 `26768`。游戏插件会检查两个端口的服务身份。服务端以 `[HH:mm:ss] [Level] 消息` 输出实际监听地址、实例连接、命令发送和结果摘要，时间使用本地时区；默认隐藏 .NET 框架和 MCP 库的普通信息，保留警告和错误。
+更新插件时先备份并替换整个 `BepInEx/plugins/AmongLLM/` 目录，避免旧版 Roslyn 或 `System.*` DLL 残留。脚本编译器固定为与游戏内 .NET 6 框架程序集兼容的 Roslyn 4.3.1，无需修改游戏的 `dotnet/` 目录。
+
+默认地址是 `http://127.0.0.1:26767/mcp`，端口被占用时服务自动尝试 `26768`。游戏插件会检查两个端口的服务身份。服务端以 `[HH:mm:ss] [Level] 消息` 输出实际监听地址、实例连接和命令完成记录，显示 RPC 目标、类型化字段值及 SnapTo 坐标；排队和发送记录降为 Debug。交互终端按级别与结果显示颜色，重定向或设置 `NO_COLOR` 时使用纯文本。时间使用本地时区；默认隐藏 .NET 框架和 MCP 库的普通信息，保留警告和错误。
 
 仓库的 `.codex/config.toml` 已按 HTTP MCP 配置 `amongllm`，默认使用 26767。在服务启动后运行下列命令，可以检测实际端口并更新这个项目的配置；其他 MCP 客户端使用输出的 URL 注册即可：
 
@@ -51,6 +53,6 @@ Itch 账号切换在运行时检查 `Platforms.StandaloneItch`，将 Itch API ke
 
 ## 验证范围
 
-`Build.ps1` 运行服务端与插件传输测试，再发布两端及 mod ZIP。测试覆盖真实 HTTP MCP 初始化/工具发现、两端 WebSocket 协议、多实例、端口回退、断线与取消、日志游标/镜像、主线程续体和嵌套属性写回。
+`Build.ps1` 运行服务端、插件传输测试及独立 .NET 6 脚本执行测试，再发布两端及 mod ZIP。测试覆盖真实 HTTP MCP 初始化/工具发现、两端 WebSocket 协议、多实例、端口回退、断线与取消、日志游标/镜像、主线程续体和嵌套属性写回。
 
 插件已使用 `D:\Game\20260929` 的实际 interop 构建。自动化测试不启动游戏；截图、账号切换、房主操作及 Hazel 远端接收仍需要游戏内验收，构建与托管协议测试不构成这部分运行证据。

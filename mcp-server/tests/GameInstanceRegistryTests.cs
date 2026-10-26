@@ -29,6 +29,7 @@ public sealed class GameInstanceRegistryTests : IAsyncLifetime
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = Environments.Development });
         builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
         builder.Logging.ClearProviders();
+        builder.Logging.SetMinimumLevel(LogLevel.Debug);
         builder.Logging.AddProvider(_logProvider);
         builder.Services.AddSingleton<GameInstanceRegistry>();
         _app = builder.Build();
@@ -159,14 +160,12 @@ public sealed class GameInstanceRegistryTests : IAsyncLifetime
         var timeout = await Assert.ThrowsAsync<TimeoutException>(() => queued);
         Assert.Contains("waiting for the game instance command slot", timeout.Message, StringComparison.OrdinalIgnoreCase);
 
-        var queuedLog = _logProvider.Entries.Last(entry => entry.EventId == ServerLogEvents.CommandQueued);
-        var queuedCommandId = queuedLog.Values["CommandId"]?.ToString();
+        var timeoutLog = _logProvider.Entries.Last(entry => entry.EventId == ServerLogEvents.CommandTimedOut &&
+            Equals(entry.Values.GetValueOrDefault("Outcome"), "timeout_waiting_for_slot"));
+        var queuedCommandId = timeoutLog.Values["CommandId"]?.ToString();
         Assert.NotNull(queuedCommandId);
         Assert.DoesNotContain(_logProvider.Entries, entry =>
             entry.EventId == ServerLogEvents.CommandSent && entry.Values["CommandId"]?.ToString() == queuedCommandId);
-        Assert.Contains(_logProvider.Entries, entry =>
-            entry.EventId == ServerLogEvents.CommandTimedOut && entry.Values["CommandId"]?.ToString() == queuedCommandId &&
-            Equals(entry.Values["Outcome"], "timeout_waiting_for_slot"));
 
         await SendJsonAsync(client, new { type = "response", id = firstCommand.RootElement.GetProperty("id").GetString(), ok = true, result = new { done = true } });
         await first;
@@ -272,13 +271,15 @@ public sealed class GameInstanceRegistryTests : IAsyncLifetime
             type = "response",
             id = command.RootElement.GetProperty("id").GetString(),
             ok = false,
-            error = new { code = "not_in_lobby", message = "A room is required." }
+            error = new { code = "not_in_lobby", message = "A room is required. token=secret-do-not-log" }
         });
         var error = await Assert.ThrowsAsync<ModelContextProtocol.McpException>(() => dispatch);
-        Assert.Contains("not_in_lobby: A room is required.", error.Message, StringComparison.Ordinal);
+        Assert.Contains("not_in_lobby: A room is required. token=secret-do-not-log", error.Message, StringComparison.Ordinal);
         var clientErrorLog = Assert.Single(_logProvider.Entries, entry => entry.EventId == ServerLogEvents.CommandClientError);
         Assert.Contains("not_in_lobby", clientErrorLog.Values["ErrorCode"]?.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain("A room is required.", clientErrorLog.Message, StringComparison.Ordinal);
+        Assert.Contains("A room is required.", clientErrorLog.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret-do-not-log", clientErrorLog.Message, StringComparison.Ordinal);
+        Assert.Contains("[REDACTED]", clientErrorLog.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -313,6 +314,11 @@ public sealed class GameInstanceRegistryTests : IAsyncLifetime
             await SendJsonAsync(client, new { type = "response", id = command.RootElement.GetProperty("id").GetString(), ok = true, result = new { submitted = true } });
         }
         await rpcDispatch;
+        var rpcCompletion = Assert.Single(_logProvider.Entries, entry =>
+            entry.EventId == ServerLogEvents.CommandCompleted && Equals(entry.Values.GetValueOrDefault("Operation"), "send_rpc"));
+        Assert.Contains("targetNetId=17", rpcCompletion.Message, StringComparison.Ordinal);
+        Assert.Contains("callId=5", rpcCompletion.Message, StringComparison.Ordinal);
+        Assert.Contains("packedUInt32=400", rpcCompletion.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -335,8 +341,9 @@ public sealed class GameInstanceRegistryTests : IAsyncLifetime
         await chat;
         var chatEvents = _logProvider.Entries.Where(entry =>
             entry.Values.TryGetValue("Operation", out var operation) && Equals(operation, "send_chat_message")).ToArray();
-        Assert.Contains(chatEvents, entry => entry.EventId == ServerLogEvents.CommandSent);
         Assert.Contains(chatEvents, entry => entry.EventId == ServerLogEvents.CommandCompleted);
+        Assert.DoesNotContain(chatEvents, entry =>
+            (entry.EventId == ServerLogEvents.CommandQueued || entry.EventId == ServerLogEvents.CommandSent) && entry.Level >= LogLevel.Information);
         Assert.DoesNotContain(chatEvents.SelectMany(entry => entry.Values.Values).Select(value => value?.ToString() ?? ""),
             value => value.Contains("hello bridge", StringComparison.Ordinal));
 

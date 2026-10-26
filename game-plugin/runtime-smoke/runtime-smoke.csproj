@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net6.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>12.0</LangVersion>
+    <RollForward>LatestPatch</RollForward>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../AmongLLM.GamePlugin.csproj" />
+    <Compile Include="../ScriptCompiler.cs" Link="ScriptCompiler.cs" />
+    <Compile Include="../UnityThreadContext.cs" Link="UnityThreadContext.cs" />
+  </ItemGroup>
+</Project>

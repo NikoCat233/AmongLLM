@@ -19,8 +19,11 @@
     <Reference Include="$(LocalAmongUsPath)/BepInEx/core/SemanticVersioning.dll" Private="false" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Remove="tests/**/*.cs" />
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" Version="4.11.0" />
+    <Compile Remove="tests/**/*.cs;runtime-smoke/**/*.cs" />
+    <!-- BepInEx's embedded host already loads the .NET 6 framework assemblies.
+         Newer Roslyn releases require Immutable/Metadata 7 or 8 and cannot bind
+         to those framework assemblies, even when their DLLs ship beside us. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" Version="[4.3.1]" />
   </ItemGroup>
   <Target Name="RequireLocalAmongUsPath" BeforeTargets="ResolveReferences" Condition="'$(LocalAmongUsPath)' == ''">
     <Error Text="Build with -p:LocalAmongUsPath=D:\Game\20260929 to use the installed game interop assemblies." />

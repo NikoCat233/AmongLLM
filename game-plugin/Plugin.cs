@@ -13,8 +13,6 @@ using BepInEx.Unity.IL2CPP.Utils.Collections;
 using Hazel;
 using Il2CppInterop.Runtime;
 using InnerNet;
-using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp.Scripting;
 using Microsoft.CodeAnalysis.Scripting;
 using TMPro;
 using UnityEngine;
@@ -766,16 +764,8 @@ public sealed class BridgeBehaviour : MonoBehaviour
         string code = GetString(work.Payload, "code");
         if (string.IsNullOrWhiteSpace(code) || code.Length > 32000) throw new InvalidOperationException("code must contain 1 to 32000 characters.");
         // Compilation does not access Unity and can run off-thread. Invoke the compiled script on Unity's thread.
-        var compilation = Task.Run(() =>
-        {
-            var references = AppDomain.CurrentDomain.GetAssemblies()
-                .Where(assembly => !assembly.IsDynamic && !string.IsNullOrWhiteSpace(assembly.Location))
-                .Select(assembly => (MetadataReference)MetadataReference.CreateFromFile(assembly.Location))
-                .DistinctBy(reference => reference.Display, StringComparer.OrdinalIgnoreCase);
-            ScriptOptions options = ScriptOptions.Default.WithReferences(references)
-                .WithImports("System", "System.Linq", "System.Threading.Tasks", "UnityEngine", "InnerNet");
-            return CSharpScript.Create<object?>(code, options, typeof(ScriptGlobals)).CreateDelegate();
-        });
+        var compilation = Task.Run(() => ScriptCompiler.Compile(code, typeof(ScriptGlobals),
+            AppDomain.CurrentDomain.GetAssemblies(), "System", "System.Linq", "System.Threading.Tasks", "UnityEngine", "InnerNet"));
         while (!compilation.IsCompleted) yield return null;
         ScriptRunner<object?> runner = compilation.GetAwaiter().GetResult();
         using var context = new UnityThreadContext(() => IsWorkCancelled(work));

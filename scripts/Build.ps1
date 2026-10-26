@@ -11,6 +11,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $GamePath 'BepInEx/interop/Assembly-
 if (-not $SkipTests) {
     Invoke-Dotnet -Arguments @('test', (Join-Path $root 'mcp-server/tests/tests.csproj'), '-c', 'Release', '-v:minimal')
     Invoke-Dotnet -Arguments @('test', (Join-Path $root 'game-plugin/tests/AmongLLM.GamePlugin.Transport.Tests.csproj'), '-c', 'Release', '-v:minimal')
+    Invoke-Dotnet -Arguments @('run', '--project', (Join-Path $root 'game-plugin/runtime-smoke/runtime-smoke.csproj'), '-c', 'Release', "-p:LocalAmongUsPath=$GamePath")
 }
 $output = Join-Path $root 'artifacts'
 $serverOutput = Join-Path $output 'mcp-server'

@@ -3,6 +3,8 @@ using AmongLLM.Server.Hosting;
 using AmongLLM.Server.Mcp;
 using AmongLLM.Server.Transport;
 
+Console.OutputEncoding = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+
 const int primaryPort = 26767;
 const int fallbackPort = 26768;
 
@@ -26,7 +28,9 @@ static WebApplication BuildApp(string[] args, int port)
     });
     builder.Logging.ClearProviders();
     builder.Logging.AddConsole(options => options.FormatterName = ServerConsoleFormatter.FormatterName)
-        .AddConsoleFormatter<ServerConsoleFormatter, Microsoft.Extensions.Logging.Console.ConsoleFormatterOptions>();
+        .AddConsoleFormatter<ServerConsoleFormatter, ServerConsoleFormatterOptions>();
+    builder.Logging.Services.Configure<ServerConsoleFormatterOptions>(
+        builder.Configuration.GetSection("Logging:Console:FormatterOptions"));
     builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, port));
     builder.Services.AddSingleton<GameInstanceRegistry>();
     builder.Services.AddMcpServer()

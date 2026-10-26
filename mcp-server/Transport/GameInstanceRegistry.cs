@@ -50,7 +50,7 @@ public sealed class GameInstanceRegistry(ILogger<GameInstanceRegistry> logger)
 
         var elapsed = Stopwatch.StartNew();
         var id = Guid.NewGuid().ToString("N");
-        var payloadSummary = ServerLogSummary.SummarizePayload(payload);
+        var payloadSummary = ServerLogSummary.SummarizePayload(operation, payload);
         using var commandScope = logger.BeginScope(new Dictionary<string, object?>
         {
             ["instanceId"] = connection.InstanceId,
@@ -58,7 +58,7 @@ public sealed class GameInstanceRegistry(ILogger<GameInstanceRegistry> logger)
             ["commandId"] = id,
             ["operation"] = operation
         });
-        LogCommand(ServerLogEvents.CommandQueued, LogLevel.Information, connection, id, operation, elapsed.Elapsed.TotalMilliseconds,
+        LogCommand(ServerLogEvents.CommandQueued, LogLevel.Debug, connection, id, operation, elapsed.Elapsed.TotalMilliseconds,
             "queued", "pending", payloadSummary);
 
         var deadline = DateTimeOffset.UtcNow.Add(timeout);
@@ -71,7 +71,7 @@ public sealed class GameInstanceRegistry(ILogger<GameInstanceRegistry> logger)
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            LogCommand(ServerLogEvents.CommandCancelled, LogLevel.Information, connection, id, operation, elapsed.Elapsed.TotalMilliseconds,
+            LogCommand(ServerLogEvents.CommandCancelled, LogLevel.Debug, connection, id, operation, elapsed.Elapsed.TotalMilliseconds,
                 "client_cancelled_before_send", "not_sent", payloadSummary);
             throw;
         }
@@ -115,15 +115,14 @@ public sealed class GameInstanceRegistry(ILogger<GameInstanceRegistry> logger)
 
                 mayHaveBeenSent = true;
                 await connection.SendAsync(command, deadlineSource.Token);
-                LogCommand(ServerLogEvents.CommandSent, LogLevel.Information, connection, id, operation, elapsed.Elapsed.TotalMilliseconds,
+                LogCommand(ServerLogEvents.CommandSent, LogLevel.Debug, connection, id, operation, elapsed.Elapsed.TotalMilliseconds,
                     "sent", "awaiting_response", payloadSummary);
                 var response = await pending.Completion.Task.WaitAsync(deadlineSource.Token);
 
                 if (!response.Ok)
                 {
                     LogCommand(ServerLogEvents.CommandClientError, LogLevel.Warning, connection, id, operation, elapsed.Elapsed.TotalMilliseconds,
-                        "client_error", "plugin error message omitted", payloadSummary, response.ErrorCode,
-                        errorMessageLength: response.ErrorMessageLength);
+                        "client_error", ServerLogSummary.SanitizeText(response.Error), payloadSummary, response.ErrorCode);
                     throw new McpException(response.Error ?? $"Game command '{operation}' failed.");
                 }
 
@@ -135,7 +134,7 @@ public sealed class GameInstanceRegistry(ILogger<GameInstanceRegistry> logger)
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 var cancelSent = mayHaveBeenSent && await TrySendCancelAsync(connection, id, "client");
-                LogCommand(ServerLogEvents.CommandCancelled, LogLevel.Information, connection, id, operation, elapsed.Elapsed.TotalMilliseconds,
+                LogCommand(ServerLogEvents.CommandCancelled, LogLevel.Debug, connection, id, operation, elapsed.Elapsed.TotalMilliseconds,
                     mayHaveBeenSent ? "client_cancelled_after_send" : "client_cancelled_before_send",
                     mayHaveBeenSent ? (cancelSent ? "cancel_sent; outcome_unknown" : "cancel_unavailable; outcome_unknown") : "not_sent",
                     payloadSummary);
@@ -182,11 +181,10 @@ public sealed class GameInstanceRegistry(ILogger<GameInstanceRegistry> logger)
         string resultSummary,
         string payloadSummary,
         string? errorCode = null,
-        string? errorType = null,
-        int? errorMessageLength = null)
+        string? errorType = null)
     {
-        logger.Log(level, eventId,
-            "Game command {Operation} {Outcome} for instance {InstanceId} (PID {ProcessId}, command {CommandId}) after {ElapsedMs} ms; resultSummary={ResultSummary}; payloadSummary={PayloadSummary}; errorCode={ErrorCode}; errorType={ErrorType}; errorMessageLength={ErrorMessageLength}.",
+        var common = new object?[]
+        {
             operation,
             outcome,
             connection.InstanceId,
@@ -194,10 +192,23 @@ public sealed class GameInstanceRegistry(ILogger<GameInstanceRegistry> logger)
             commandId,
             Math.Round(elapsedMs, 3),
             ServerLogSummary.SanitizeText(resultSummary),
-            ServerLogSummary.SanitizeText(payloadSummary),
-            ServerLogSummary.SanitizeText(errorCode),
-            ServerLogSummary.SanitizeText(errorType),
-            errorMessageLength);
+            ServerLogSummary.SanitizeText(payloadSummary)
+        };
+        if (errorCode is null && errorType is null)
+        {
+            logger.Log(level, eventId,
+                "Game command {Operation}; outcome={Outcome}; instance={InstanceId} (PID {ProcessId}, command {CommandId}); {ElapsedMs} ms; result={ResultSummary}; payload={PayloadSummary}.",
+                common);
+            return;
+        }
+
+        var withError = new object?[common.Length + 2];
+        Array.Copy(common, withError, common.Length);
+        withError[^2] = ServerLogSummary.SanitizeText(errorCode);
+        withError[^1] = ServerLogSummary.SanitizeText(errorType);
+        logger.Log(level, eventId,
+            "Game command {Operation}; outcome={Outcome}; instance={InstanceId} (PID {ProcessId}, command {CommandId}); {ElapsedMs} ms; result={ResultSummary}; payload={PayloadSummary}; errorCode={ErrorCode}; errorType={ErrorType}.",
+            withError);
     }
 
     private async Task<bool> TrySendCancelAsync(GameConnection connection, string id, string reason)
@@ -495,8 +506,8 @@ public sealed class GameInstanceRegistry(ILogger<GameInstanceRegistry> logger)
                 : JsonDocument.Parse("{}").RootElement.Clone();
             var error = message.TryGetProperty("error", out var errorElement)
                 ? ReadCommandError(errorElement)
-                : new GameCommandError(null, null, null);
-            pending.Completion.TrySetResult(new GameCommandResponse(ok, result, error.Text, error.Code, error.MessageLength));
+                : new GameCommandError(null, null);
+            pending.Completion.TrySetResult(new GameCommandResponse(ok, result, error.Text, error.Code));
             return;
         }
 
@@ -508,10 +519,10 @@ public sealed class GameInstanceRegistry(ILogger<GameInstanceRegistry> logger)
         if (error.ValueKind == JsonValueKind.String)
         {
             var text = error.GetString();
-            return new GameCommandError(text, null, text?.Length);
+            return new GameCommandError(text, null);
         }
         if (error.ValueKind != JsonValueKind.Object)
-            return new GameCommandError(null, null, null);
+            return new GameCommandError(null, null);
 
         var code = error.TryGetProperty("code", out var codeValue) && codeValue.ValueKind == JsonValueKind.String
             ? codeValue.GetString()
@@ -522,9 +533,8 @@ public sealed class GameInstanceRegistry(ILogger<GameInstanceRegistry> logger)
         if (string.IsNullOrWhiteSpace(message))
             return new GameCommandError(
                 string.IsNullOrWhiteSpace(code) ? "The game plugin reported a command error." : $"Game plugin error ({code}).",
-                code,
-                null);
-        return new GameCommandError(string.IsNullOrWhiteSpace(code) ? message : $"{code}: {message}", code, message.Length);
+                code);
+        return new GameCommandError(string.IsNullOrWhiteSpace(code) ? message : $"{code}: {message}", code);
     }
 
     private static bool TryReadRegistration(JsonElement element, out GameRegistration? registration, out string? error)
@@ -657,8 +667,8 @@ public sealed record GameInstanceView(
     long LastSequence,
     JsonElement State);
 
-internal sealed record GameCommandResponse(bool Ok, JsonElement Result, string? Error, string? ErrorCode, int? ErrorMessageLength);
-internal sealed record GameCommandError(string? Text, string? Code, int? MessageLength);
+internal sealed record GameCommandResponse(bool Ok, JsonElement Result, string? Error, string? ErrorCode);
+internal sealed record GameCommandError(string? Text, string? Code);
 
 internal sealed class GameConnection(GameRegistration registration, WebSocket socket)
 {
