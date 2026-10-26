@@ -132,10 +132,10 @@ public sealed class GameTools
         JsonSerializer.Serialize(await Dispatch(registry, instanceId, "click_button", new { buttonId, screenId }, DefaultTimeout, null, cancellationToken), Json);
 
     [McpServerTool(Name = "click_sequence", Destructive = true)]
-    [Description("Run ordered click, fixed-wait, and wait-for-button steps. Each button selector is resolved again by the plugin at execution time.")]
+    [Description("Run ordered click, fixed-wait, and wait-for-button steps. Specify each click/waitForButton step's timeoutMs explicitly when choosing how long an absent button may be awaited; omitted timeoutMs defaults to 5000 ms. A missing button stops the sequence at that bound. Selectors are resolved again at execution time.")]
     public static async Task<string> ClickSequence(
         [Description("Registered game instance GUID.")] string instanceId,
-        [Description("Ordered steps: {kind:'click',selector:{...}}, {kind:'wait',milliseconds:n}, or {kind:'waitForButton',selector:{...},timeoutMs:n}.")] JsonElement steps,
+        [Description("Ordered steps: {kind:'click',selector:{...},timeoutMs:5000}, {kind:'wait',milliseconds:n}, or {kind:'waitForButton',selector:{...},timeoutMs:5000}. Per-button timeout range: 1..60000 ms; default 5000 ms.")] JsonElement steps,
         [Description("Overall sequence timeout in milliseconds; allowed range is 1000 through 180000.")] int timeoutMs,
         GameInstanceRegistry registry,
         IProgress<ProgressNotificationValue>? progress,
@@ -145,6 +145,20 @@ public sealed class GameTools
             throw new McpException("steps must be an array containing 1 to 64 steps.");
         if (timeoutMs is < 1000 or > 180000)
             throw new McpException("timeoutMs must be between 1000 and 180000.");
+        foreach (var step in steps.EnumerateArray())
+        {
+            if (step.ValueKind != JsonValueKind.Object || !step.TryGetProperty("kind", out var kind)) throw new McpException("Each step requires kind.");
+            if (kind.GetString() == "wait")
+            {
+                if (!step.TryGetProperty("milliseconds", out var milliseconds) || !milliseconds.TryGetInt32(out var value) || value is < 0 or > 60000) throw new McpException("Fixed waits must specify 0..60000 milliseconds.");
+            }
+            else if (kind.GetString() is "click" or "waitForButton")
+            {
+                if (!step.TryGetProperty("selector", out var selector) || selector.ValueKind != JsonValueKind.Object) throw new McpException("Button steps require an object selector.");
+                if (step.TryGetProperty("timeoutMs", out var buttonTimeout) && (!buttonTimeout.TryGetInt32(out var value) || value is < 1 or > 60000)) throw new McpException("Per-button timeoutMs must be 1..60000 milliseconds, or omitted for the 5000 ms default.");
+            }
+            else throw new McpException("Step kind must be click, wait, or waitForButton.");
+        }
 
         var result = await Dispatch(registry, instanceId, "click_sequence", new { steps, timeoutMs },
             TimeSpan.FromMilliseconds(timeoutMs), progress, cancellationToken);

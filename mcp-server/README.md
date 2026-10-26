@@ -35,14 +35,16 @@ Incoming WebSocket text messages are limited to 32 MiB so screenshot PNG respons
 
 ```json
 [
-  {"kind":"click","selector":{"buttonId":"continue","screenId":"login"}},
+  {"kind":"click","selector":{"name":"ContinueButton"},"timeoutMs":5000},
   {"kind":"wait","milliseconds":500},
   {"kind":"waitForButton","selector":{"label":"Online"},"timeoutMs":10000},
-  {"kind":"click","selector":{"label":"Online"}}
+  {"kind":"click","selector":{"label":"Online"},"timeoutMs":5000}
 ]
 ```
 
 `set_text` targets a control listed by `get_screen` and carries its `screenId`, Unity control instance ID, and text. The plugin checks that the same screen and active `TextBoxTMP` or `TMP_InputField` still own the control before changing it.
+
+Agents should specify `timeoutMs` on each `click` and `waitForButton` step to state the maximum wait for a missing button. Omitted values default to **5000 ms**; explicit values may be 1–60000 ms. A `click` step waits for its button before clicking, and an unavailable button stops the sequence when its step limit or the overall deadline expires.
 
 `read_game_logs` returns Unity and BepInEx log entries with sequence numbers. Use `afterSequence` for incremental reads and optional `sources` / `levels` filters. Each response also includes ring-buffer cursor details and the path or error for the local JSONL mirror. The server only reads logs when this tool is called; it does not poll automatically.
 

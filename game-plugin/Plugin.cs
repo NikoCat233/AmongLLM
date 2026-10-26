@@ -48,7 +48,7 @@ internal static class RuntimeInfo
 
 public sealed class BridgeBehaviour : MonoBehaviour
 {
-    private const int MaxSequenceDurationMs = 300_000;
+    private const int MaxSequenceDurationMs = 180_000;
     private const int MaxQueuedCommands = 128;
     private const int MaxFieldCount = 128;
     private const int MaxStringLength = 8192;
@@ -411,12 +411,12 @@ public sealed class BridgeBehaviour : MonoBehaviour
         if (steps.ValueKind != JsonValueKind.Array || steps.GetArrayLength() == 0 || steps.GetArrayLength() > 64)
             throw new InvalidOperationException("steps must contain 1 to 64 actions.");
         int maxDurationMs = GetIntOr(work.Payload, "timeoutMs", MaxSequenceDurationMs);
-        if (maxDurationMs is < 1 or > MaxSequenceDurationMs) throw new InvalidOperationException("timeoutMs must be between 1 and 300000.");
+        if (maxDurationMs is < 1 or > MaxSequenceDurationMs) throw new InvalidOperationException("timeoutMs must be between 1 and 180000.");
         float deadline = Time.realtimeSinceStartup + maxDurationMs / 1000f;
         int completed = 0;
         foreach (JsonElement step in steps.EnumerateArray())
         {
-            if (Time.realtimeSinceStartup >= deadline) throw new TimeoutException("Click sequence exceeded its 5 minute limit.");
+            if (Time.realtimeSinceStartup >= deadline) throw new TimeoutException("Click sequence exceeded its overall timeout.");
             string kind = GetStringOr(step, "kind", GetStringOr(step, "type", ""));
             if (kind == "wait")
             {
@@ -426,24 +426,12 @@ public sealed class BridgeBehaviour : MonoBehaviour
                 while (Time.realtimeSinceStartup < waitUntil) yield return null;
                 if (Time.realtimeSinceStartup >= deadline) throw new TimeoutException("Click sequence exceeded its overall timeout.");
             }
-            else if (kind == "waitForButton")
+            else if (kind is "waitForButton" or "click")
             {
-                JsonElement selector = GetProperty(step, "selector") ?? throw new InvalidOperationException("waitForButton selector is required.");
-                int timeoutMs = GetInt(step, "timeoutMs");
-                if (timeoutMs <= 0 || timeoutMs > 60_000) throw new InvalidOperationException("waitForButton timeoutMs must be between 1 and 60000.");
-                float buttonDeadline = Math.Min(deadline, Time.realtimeSinceStartup + timeoutMs / 1000f);
-                bool found = false;
-                while (Time.realtimeSinceStartup < buttonDeadline)
-                {
-                    if (TryResolveButton(selector, out _)) { found = true; break; }
-                    yield return null;
-                }
-                if (!found) throw new TimeoutException("The selected button did not appear before timeout.");
-            }
-            else if (kind == "click")
-            {
-                JsonElement selector = GetProperty(step, "selector") ?? throw new InvalidOperationException("click selector is required.");
-                ClickButton(step);
+                JsonElement selector = GetProperty(step, "selector") ?? throw new InvalidOperationException("Button selector is required.");
+                int timeoutMs = GetIntOr(step, "timeoutMs", ButtonWait.DefaultTimeoutMs);
+                foreach (var wait in ButtonWait.UntilAvailable(() => TryResolveButton(selector, out _), () => Time.realtimeSinceStartup, deadline, timeoutMs)) yield return wait;
+                if (kind == "click") ClickButton(step);
             }
             else
             {

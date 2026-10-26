@@ -3,6 +3,35 @@ namespace AmongLLM.GamePlugin.Tests;
 public sealed class UtilityTests
 {
     [Fact]
+    public void MissingButtonStopsAtFiveSecondsByDefault()
+    {
+        double now = 0;
+        using var wait = ButtonWait.UntilAvailable(() => false, () => now, 30).GetEnumerator();
+        Assert.True(wait.MoveNext());
+        now = 4.999;
+        Assert.True(wait.MoveNext());
+        now = 5;
+        Assert.Throws<TimeoutException>(() => wait.MoveNext());
+    }
+
+    [Fact]
+    public void ExplicitButtonTimeoutAndEarlierSequenceDeadlineAreRespected()
+    {
+        double now = 0;
+        bool found = false;
+        using var longer = ButtonWait.UntilAvailable(() => found, () => now, 30, 12000).GetEnumerator();
+        Assert.True(longer.MoveNext());
+        now = 6;
+        Assert.True(longer.MoveNext());
+        found = true;
+        Assert.False(longer.MoveNext());
+        using var shorter = ButtonWait.UntilAvailable(() => false, () => now, 7, 12000).GetEnumerator();
+        Assert.True(shorter.MoveNext());
+        now = 7;
+        Assert.Throws<TimeoutException>(() => shorter.MoveNext());
+    }
+
+    [Fact]
     public void NestedStructWritesPropagateBackThroughParentProperties()
     {
         var target = new ExampleObject { Position = new Position { X = 1, Y = 2 } };
