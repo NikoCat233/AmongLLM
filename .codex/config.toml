@@ -1,0 +1,4 @@
+[mcp_servers.amongllm]
+url = "http://127.0.0.1:26767/mcp"
+startup_timeout_sec = 10
+tool_timeout_sec = 190
