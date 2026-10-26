@@ -67,6 +67,10 @@ Typed fields support `bool`, `byte`, `sbyte`, `int16`, `uint16`, `int32`, `uint3
 - Object and code inspection: `list_net_objects`, `read_net_object_properties`, `write_net_object_property`, `execute_csharp`
 - Diagnostics: `list_loaded_mods`, `read_game_logs`
 
+## Server logs
+
+The server writes structured JSON console logs with UTC ISO 8601 timestamps and scopes. Stable event names cover startup, port fallback, WebSocket acceptance, registration/reconnection/disconnection, and command queue/send/completion/error/timeout/cancellation/transport failures. Command events include the instance, process, command ID, operation, elapsed time, outcome, and bounded payload/result summaries. Payload summaries show only property shapes and counts; credential-shaped fields, code and message contents, byte values, screenshot data, game log entries, and arbitrary inspection results are omitted or redacted.
+
 The Itch account tool passes the token through the bridge without server-side logging. `execute_csharp` executes code inside the game process and can read credentials, hang, or crash that process. Use it only with trusted snippets.
 
 ## Tests

@@ -23,8 +23,12 @@ public static class PortBinding
             }
             catch (Exception error) when (IsAddressInUse(error))
             {
+                candidate.Logger.LogWarning(ServerLogEvents.PortFallback,
+                    "Port {Port} is occupied; outcome={Outcome}; resultSummary={ResultSummary}.",
+                    port,
+                    "trying_next_configured_port",
+                    "loopback address unavailable");
                 await candidate.DisposeAsync();
-                Console.Error.WriteLine($"Port {port} is occupied; trying the next configured port.");
             }
         }
 

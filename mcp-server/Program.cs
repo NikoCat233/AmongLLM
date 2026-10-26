@@ -8,13 +8,25 @@ const int fallbackPort = 26768;
 
 var bound = await PortBinding.StartFirstAvailableAsync(port => BuildApp(args, port), primaryPort, fallbackPort);
 
-Console.WriteLine($"AmongLLM MCP server listening on http://127.0.0.1:{bound.Port}/mcp");
-Console.WriteLine($"Game plugin WebSocket endpoint: ws://127.0.0.1:{bound.Port}/game/ws");
+bound.App.Logger.LogInformation(ServerLogEvents.ServerStarted,
+    "AmongLLM MCP server started; serverId={ServerId}; port={Port}; protocolVersion={ProtocolVersion}; mcpEndpoint={McpEndpoint}; gameWebSocketEndpoint={GameWebSocketEndpoint}.",
+    ServiceIdentity.Id,
+    bound.Port,
+    1,
+    $"http://127.0.0.1:{bound.Port}/mcp",
+    $"ws://127.0.0.1:{bound.Port}/game/ws");
 await bound.App.WaitForShutdownAsync();
 
 static WebApplication BuildApp(string[] args, int port)
 {
     var builder = WebApplication.CreateBuilder(args);
+    builder.Logging.ClearProviders();
+    builder.Logging.AddJsonConsole(options =>
+    {
+        options.TimestampFormat = "O";
+        options.UseUtcTimestamp = true;
+        options.IncludeScopes = true;
+    });
     builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, port));
     builder.Services.AddSingleton<GameInstanceRegistry>();
     builder.Services.AddMcpServer()

@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Hosting;
 using ModelContextProtocol;
 using Xunit;
@@ -21,11 +22,14 @@ public sealed class GameInstanceRegistryTests : IAsyncLifetime
     private WebApplication _app = null!;
     private GameInstanceRegistry _registry = null!;
     private Uri _webSocketUri = null!;
+    private readonly RecordingLoggerProvider _logProvider = new();
 
     public async Task InitializeAsync()
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = Environments.Development });
         builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
+        builder.Logging.ClearProviders();
+        builder.Logging.AddProvider(_logProvider);
         builder.Services.AddSingleton<GameInstanceRegistry>();
         _app = builder.Build();
         _app.UseWebSockets();
@@ -142,6 +146,15 @@ public sealed class GameInstanceRegistryTests : IAsyncLifetime
         var timeout = await Assert.ThrowsAsync<TimeoutException>(() => queued);
         Assert.Contains("waiting for the game instance command slot", timeout.Message, StringComparison.OrdinalIgnoreCase);
 
+        var queuedLog = _logProvider.Entries.Last(entry => entry.EventId == ServerLogEvents.CommandQueued);
+        var queuedCommandId = queuedLog.Values["CommandId"]?.ToString();
+        Assert.NotNull(queuedCommandId);
+        Assert.DoesNotContain(_logProvider.Entries, entry =>
+            entry.EventId == ServerLogEvents.CommandSent && entry.Values["CommandId"]?.ToString() == queuedCommandId);
+        Assert.Contains(_logProvider.Entries, entry =>
+            entry.EventId == ServerLogEvents.CommandTimedOut && entry.Values["CommandId"]?.ToString() == queuedCommandId &&
+            Equals(entry.Values["Outcome"], "timeout_waiting_for_slot"));
+
         await SendJsonAsync(client, new { type = "response", id = firstCommand.RootElement.GetProperty("id").GetString(), ok = true, result = new { done = true } });
         await first;
     }
@@ -249,6 +262,9 @@ public sealed class GameInstanceRegistryTests : IAsyncLifetime
         });
         var error = await Assert.ThrowsAsync<ModelContextProtocol.McpException>(() => dispatch);
         Assert.Contains("not_in_lobby: A room is required.", error.Message, StringComparison.Ordinal);
+        var clientErrorLog = Assert.Single(_logProvider.Entries, entry => entry.EventId == ServerLogEvents.CommandClientError);
+        Assert.Contains("not_in_lobby", clientErrorLog.Values["ErrorCode"]?.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("A room is required.", clientErrorLog.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -303,6 +319,12 @@ public sealed class GameInstanceRegistryTests : IAsyncLifetime
             await SendJsonAsync(client, new { type = "response", id = command.RootElement.GetProperty("id").GetString(), ok = true, result = new { sent = true } });
         }
         await chat;
+        var chatEvents = _logProvider.Entries.Where(entry =>
+            entry.Values.TryGetValue("Operation", out var operation) && Equals(operation, "send_chat_message")).ToArray();
+        Assert.Contains(chatEvents, entry => entry.EventId == ServerLogEvents.CommandSent);
+        Assert.Contains(chatEvents, entry => entry.EventId == ServerLogEvents.CommandCompleted);
+        Assert.DoesNotContain(chatEvents.SelectMany(entry => entry.Values.Values).Select(value => value?.ToString() ?? ""),
+            value => value.Contains("hello bridge", StringComparison.Ordinal));
 
         var logs = GameTools.ReadGameLogs(instanceId, _registry, CancellationToken.None,
             afterSequence: 42, limit: 50, sources: ["Unity"], levels: ["Warning"]);
@@ -341,6 +363,11 @@ public sealed class GameInstanceRegistryTests : IAsyncLifetime
             await SendJsonAsync(client, new { type = "response", id = command.RootElement.GetProperty("id").GetString(), ok = true, result = new { loginStatus = "LoggedIn" } });
         }
         await login;
+        var authLogText = string.Join("\n", _logProvider.Entries
+            .Where(entry => entry.Values.TryGetValue("Operation", out var operation) && Equals(operation, "set_itch_auth_token_and_login"))
+            .SelectMany(entry => entry.Values.Values.Select(value => value?.ToString() ?? "").Append(entry.Message)));
+        Assert.DoesNotContain(apiKey, authLogText, StringComparison.Ordinal);
+        Assert.DoesNotContain("platformAuthToken", authLogText, StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<ClientWebSocket> ConnectAsync()
@@ -402,4 +429,33 @@ public sealed class GameInstanceRegistryTests : IAsyncLifetime
     {
         public void Report(T value) => callback(value);
     }
+
+    private sealed class RecordingLoggerProvider : ILoggerProvider
+    {
+        private readonly System.Collections.Concurrent.ConcurrentQueue<RecordedLog> entries = new();
+        public IReadOnlyList<RecordedLog> Entries => entries.ToArray();
+        public ILogger CreateLogger(string categoryName) => new RecordingLogger(entries);
+        public void Dispose() { }
+
+        private sealed class RecordingLogger(System.Collections.Concurrent.ConcurrentQueue<RecordedLog> entries) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
+            public bool IsEnabled(LogLevel logLevel) => true;
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            {
+                var values = state is IEnumerable<KeyValuePair<string, object?>> properties
+                    ? properties.ToDictionary(pair => pair.Key, pair => pair.Value)
+                    : new Dictionary<string, object?>();
+                entries.Enqueue(new RecordedLog(logLevel, eventId, formatter(state, exception), values));
+            }
+        }
+
+        private sealed class NullScope : IDisposable
+        {
+            public static readonly NullScope Instance = new();
+            public void Dispose() { }
+        }
+    }
+
+    private sealed record RecordedLog(LogLevel Level, EventId EventId, string Message, IReadOnlyDictionary<string, object?> Values);
 }

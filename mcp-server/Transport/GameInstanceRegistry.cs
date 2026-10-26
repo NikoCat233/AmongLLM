@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net;
 using System.Net.WebSockets;
 using System.Text.Json;
@@ -47,6 +48,19 @@ public sealed class GameInstanceRegistry(ILogger<GameInstanceRegistry> logger)
         if (!_instances.TryGetValue(instanceId, out var connection))
             throw new McpException($"Game instance '{instanceId}' has not registered.");
 
+        var elapsed = Stopwatch.StartNew();
+        var id = Guid.NewGuid().ToString("N");
+        var payloadSummary = ServerLogSummary.SummarizePayload(payload);
+        using var commandScope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["instanceId"] = connection.InstanceId,
+            ["processId"] = connection.ProcessId,
+            ["commandId"] = id,
+            ["operation"] = operation
+        });
+        LogCommand(ServerLogEvents.CommandQueued, LogLevel.Information, connection, id, operation, elapsed.Elapsed.TotalMilliseconds,
+            "queued", "pending", payloadSummary);
+
         var deadline = DateTimeOffset.UtcNow.Add(timeout);
         using var deadlineSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadlineSource.CancelAfter(timeout);
@@ -55,19 +69,34 @@ public sealed class GameInstanceRegistry(ILogger<GameInstanceRegistry> logger)
         {
             await commandLock.WaitAsync(deadlineSource.Token);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            LogCommand(ServerLogEvents.CommandCancelled, LogLevel.Information, connection, id, operation, elapsed.Elapsed.TotalMilliseconds,
+                "client_cancelled_before_send", "not_sent", payloadSummary);
+            throw;
+        }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
+            LogCommand(ServerLogEvents.CommandTimedOut, LogLevel.Warning, connection, id, operation, elapsed.Elapsed.TotalMilliseconds,
+                "timeout_waiting_for_slot", "not_sent", payloadSummary);
             throw new TimeoutException($"Command '{operation}' timed out waiting for the game instance command slot; it was not sent.");
         }
 
         try
         {
             if (!_instances.TryGetValue(instanceId, out var current) || !ReferenceEquals(current, connection))
+            {
+                LogCommand(ServerLogEvents.CommandTransportError, LogLevel.Warning, connection, id, operation, elapsed.Elapsed.TotalMilliseconds,
+                    "connection_replaced_before_send", "not_sent", payloadSummary, errorCode: "connection_replaced");
                 throw new McpException($"Game instance '{instanceId}' reconnected before the command could be sent. Retry against the current connection.");
+            }
             if (!connection.IsOnline(DateTimeOffset.UtcNow, HeartbeatExpiry))
+            {
+                LogCommand(ServerLogEvents.CommandTransportError, LogLevel.Warning, connection, id, operation, elapsed.Elapsed.TotalMilliseconds,
+                    "offline_before_send", "not_sent", payloadSummary, errorCode: "instance_offline");
                 throw new McpException($"Game instance '{instanceId}' is offline or its heartbeat expired.");
+            }
 
-            var id = Guid.NewGuid().ToString("N");
             var pending = new PendingCommand(progress);
             if (!connection.Pending.TryAdd(id, pending))
                 throw new InvalidOperationException("Generated duplicate command ID.");
@@ -86,24 +115,50 @@ public sealed class GameInstanceRegistry(ILogger<GameInstanceRegistry> logger)
 
                 mayHaveBeenSent = true;
                 await connection.SendAsync(command, deadlineSource.Token);
+                LogCommand(ServerLogEvents.CommandSent, LogLevel.Information, connection, id, operation, elapsed.Elapsed.TotalMilliseconds,
+                    "sent", "awaiting_response", payloadSummary);
                 var response = await pending.Completion.Task.WaitAsync(deadlineSource.Token);
 
                 if (!response.Ok)
+                {
+                    LogCommand(ServerLogEvents.CommandClientError, LogLevel.Warning, connection, id, operation, elapsed.Elapsed.TotalMilliseconds,
+                        "client_error", "plugin error message omitted", payloadSummary, response.ErrorCode,
+                        errorMessageLength: response.ErrorMessageLength);
                     throw new McpException(response.Error ?? $"Game command '{operation}' failed.");
+                }
 
+                var resultSummary = ServerLogSummary.SummarizeResult(operation, response.Result);
+                LogCommand(ServerLogEvents.CommandCompleted, LogLevel.Information, connection, id, operation, elapsed.Elapsed.TotalMilliseconds,
+                    "success", resultSummary, payloadSummary);
                 return response.Result;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                if (mayHaveBeenSent)
-                    await TrySendCancelAsync(connection, id, "client");
+                var cancelSent = mayHaveBeenSent && await TrySendCancelAsync(connection, id, "client");
+                LogCommand(ServerLogEvents.CommandCancelled, LogLevel.Information, connection, id, operation, elapsed.Elapsed.TotalMilliseconds,
+                    mayHaveBeenSent ? "client_cancelled_after_send" : "client_cancelled_before_send",
+                    mayHaveBeenSent ? (cancelSent ? "cancel_sent; outcome_unknown" : "cancel_unavailable; outcome_unknown") : "not_sent",
+                    payloadSummary);
                 throw;
             }
             catch (OperationCanceledException) when (deadlineSource.IsCancellationRequested)
             {
-                if (mayHaveBeenSent)
-                    await TrySendCancelAsync(connection, id, "timeout");
+                var cancelSent = mayHaveBeenSent && await TrySendCancelAsync(connection, id, "timeout");
+                LogCommand(ServerLogEvents.CommandTimedOut, LogLevel.Warning, connection, id, operation, elapsed.Elapsed.TotalMilliseconds,
+                    mayHaveBeenSent ? "timeout_after_send" : "timeout_before_send",
+                    mayHaveBeenSent ? (cancelSent ? "cancel_sent; outcome_unknown" : "cancel_unavailable; outcome_unknown") : "not_sent",
+                    payloadSummary);
                 throw new TimeoutException($"Command '{operation}' timed out. A cancel was sent when the connection allowed it; the outcome is unknown and it was not replayed.");
+            }
+            catch (McpException)
+            {
+                throw;
+            }
+            catch (Exception error)
+            {
+                LogCommand(ServerLogEvents.CommandTransportError, LogLevel.Error, connection, id, operation, elapsed.Elapsed.TotalMilliseconds,
+                    "transport_error", "outcome_unknown", payloadSummary, errorType: error.GetType().Name);
+                throw;
             }
             finally
             {
@@ -116,16 +171,46 @@ public sealed class GameInstanceRegistry(ILogger<GameInstanceRegistry> logger)
         }
     }
 
-    private async Task TrySendCancelAsync(GameConnection connection, string id, string reason)
+    private void LogCommand(
+        EventId eventId,
+        LogLevel level,
+        GameConnection connection,
+        string commandId,
+        string operation,
+        double elapsedMs,
+        string outcome,
+        string resultSummary,
+        string payloadSummary,
+        string? errorCode = null,
+        string? errorType = null,
+        int? errorMessageLength = null)
+    {
+        logger.Log(level, eventId,
+            "Game command {Operation} {Outcome} for instance {InstanceId} (PID {ProcessId}, command {CommandId}) after {ElapsedMs} ms; resultSummary={ResultSummary}; payloadSummary={PayloadSummary}; errorCode={ErrorCode}; errorType={ErrorType}; errorMessageLength={ErrorMessageLength}.",
+            operation,
+            outcome,
+            connection.InstanceId,
+            connection.ProcessId,
+            commandId,
+            Math.Round(elapsedMs, 3),
+            ServerLogSummary.SanitizeText(resultSummary),
+            ServerLogSummary.SanitizeText(payloadSummary),
+            ServerLogSummary.SanitizeText(errorCode),
+            ServerLogSummary.SanitizeText(errorType),
+            errorMessageLength);
+    }
+
+    private async Task<bool> TrySendCancelAsync(GameConnection connection, string id, string reason)
     {
         using var bounded = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
         try
         {
             await connection.SendAsync(new { type = "cancel", id, reason }, bounded.Token);
+            return true;
         }
         catch (Exception error) when (error is OperationCanceledException or WebSocketException or IOException or ObjectDisposedException)
         {
-            logger.LogDebug("Could not send cancellation for a game command ({ErrorType}).", error.GetType().Name);
+            return false;
         }
     }
 
@@ -144,33 +229,59 @@ public sealed class GameInstanceRegistry(ILogger<GameInstanceRegistry> logger)
         }
 
         using var socket = await context.WebSockets.AcceptWebSocketAsync();
+        var acceptedAt = Stopwatch.StartNew();
+        logger.LogInformation(ServerLogEvents.WebSocketAccepted,
+            "Accepted game WebSocket {ConnectionId} from {RemoteAddress}; serverId={ServerId}; elapsedMs={ElapsedMs}; outcome={Outcome}; resultSummary={ResultSummary}.",
+            context.Connection.Id,
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            ServiceIdentity.Id,
+            0d,
+            "accepted",
+            "awaiting_registration");
         GameConnection? connection = null;
         try
         {
             using var first = await ReceiveDocumentAsync(socket, context.RequestAborted);
             if (first is null)
             {
+                LogRegistrationRejected("unknown", 0, "missing_registration", acceptedAt.Elapsed.TotalMilliseconds);
                 await RejectSocketAsync(socket, "invalid_registration", "A register message is required.");
                 return;
             }
             if (!TryReadRegistration(first.RootElement, out var registration, out var error))
             {
+                LogRegistrationRejected("unknown", 0, "invalid_registration", acceptedAt.Elapsed.TotalMilliseconds);
                 await RejectSocketAsync(socket, "invalid_registration", error ?? "Invalid register message.");
                 return;
             }
 
             var candidate = new GameConnection(registration!, socket);
+            bool isReconnect;
             try
             {
-                await RegisterAsync(candidate, context.RequestAborted);
+                isReconnect = await RegisterAsync(candidate, context.RequestAborted);
             }
             catch (RegistrationRejectedException rejected)
             {
+                LogRegistrationRejected(candidate.InstanceId, candidate.ProcessId, rejected.Code, acceptedAt.Elapsed.TotalMilliseconds);
                 await RejectSocketAsync(socket, rejected.Code, rejected.Message);
                 return;
             }
 
             connection = candidate;
+            using var instanceScope = logger.BeginScope(new Dictionary<string, object?>
+            {
+                ["instanceId"] = connection.InstanceId,
+                ["processId"] = connection.ProcessId
+            });
+            logger.LogInformation(
+                isReconnect ? ServerLogEvents.GameInstanceReconnected : ServerLogEvents.GameInstanceRegistered,
+                "Game instance {InstanceId} (PID {ProcessId}) {Outcome} after {ElapsedMs} ms; resultSummary={ResultSummary}.",
+                connection.InstanceId,
+                connection.ProcessId,
+                isReconnect ? "reconnected" : "registered",
+                Math.Round(acceptedAt.Elapsed.TotalMilliseconds, 3),
+                $"capabilities={connection.Capabilities.Length}; gameVersion={ServerLogSummary.SanitizeText(connection.GameVersion)}; modVersion={ServerLogSummary.SanitizeText(connection.ModVersion)}");
             await connection.SendAsync(new
             {
                 type = "registered",
@@ -207,16 +318,29 @@ public sealed class GameInstanceRegistry(ILogger<GameInstanceRegistry> logger)
         }
         catch (WebSocketException)
         {
-            logger.LogDebug("Game WebSocket disconnected.");
+            if (connection is null)
+                logger.LogDebug(ServerLogEvents.WebSocketTransportError,
+                    "Unregistered WebSocket closed; elapsedMs={ElapsedMs}; outcome={Outcome}; resultSummary={ResultSummary}.",
+                    Math.Round(acceptedAt.Elapsed.TotalMilliseconds, 3), "disconnected_before_registration", "connection_closed");
         }
         catch (Exception error) when (connection is null && error is (InvalidDataException or JsonException))
         {
-            logger.LogDebug("Rejected game registration frame ({ErrorType}).", error.GetType().Name);
+            LogRegistrationRejected("unknown", 0, "invalid_registration", acceptedAt.Elapsed.TotalMilliseconds);
+            logger.LogDebug(ServerLogEvents.WebSocketTransportError,
+                "Invalid registration frame; elapsedMs={ElapsedMs}; outcome={Outcome}; errorType={ErrorType}; resultSummary={ResultSummary}.",
+                Math.Round(acceptedAt.Elapsed.TotalMilliseconds, 3), "registration_rejected", error.GetType().Name, "frame content omitted");
             await RejectSocketAsync(socket, "invalid_registration", "The registration frame was invalid.");
         }
         catch (Exception error)
         {
-            logger.LogWarning("Rejected game WebSocket message ({ErrorType}).", error.GetType().Name);
+            logger.LogWarning(ServerLogEvents.WebSocketTransportError,
+                "Game WebSocket failed; instanceId={InstanceId}; processId={ProcessId}; elapsedMs={ElapsedMs}; outcome={Outcome}; errorType={ErrorType}; resultSummary={ResultSummary}.",
+                connection?.InstanceId ?? "unknown",
+                connection?.ProcessId ?? 0,
+                Math.Round(acceptedAt.Elapsed.TotalMilliseconds, 3),
+                connection is null ? "registration_error" : "transport_error",
+                error.GetType().Name,
+                "message content omitted");
             await CloseAsync(socket, WebSocketCloseStatus.InvalidPayloadData, "Invalid protocol message.");
         }
         finally
@@ -226,7 +350,7 @@ public sealed class GameInstanceRegistry(ILogger<GameInstanceRegistry> logger)
         }
     }
 
-    private async Task RegisterAsync(GameConnection connection, CancellationToken cancellationToken)
+    private async Task<bool> RegisterAsync(GameConnection connection, CancellationToken cancellationToken)
     {
         await _registrationLock.WaitAsync(cancellationToken);
         try
@@ -242,8 +366,7 @@ public sealed class GameInstanceRegistry(ILogger<GameInstanceRegistry> logger)
                 await CloseAsync(previous.Socket, WebSocketCloseStatus.NormalClosure, "Replaced by reconnect.");
             }
 
-            logger.LogInformation("Registered game instance {InstanceId} (PID {ProcessId}, game {GameVersion}, mod {ModVersion}).",
-                connection.InstanceId, connection.ProcessId, connection.GameVersion, connection.ModVersion);
+            return previous is not null;
         }
         finally
         {
@@ -266,10 +389,27 @@ public sealed class GameInstanceRegistry(ILogger<GameInstanceRegistry> logger)
         }
         catch (Exception error) when (error is WebSocketException or IOException or ObjectDisposedException or InvalidOperationException)
         {
-            logger.LogDebug("Game WebSocket ping failed ({ErrorType}).", error.GetType().Name);
+            logger.LogWarning(ServerLogEvents.WebSocketTransportError,
+                "Game WebSocket ping failed; instanceId={InstanceId}; processId={ProcessId}; elapsedMs={ElapsedMs}; outcome={Outcome}; errorType={ErrorType}; resultSummary={ResultSummary}.",
+                connection.InstanceId,
+                connection.ProcessId,
+                Math.Round((DateTimeOffset.UtcNow - connection.RegisteredAtUtc).TotalMilliseconds, 3),
+                "ping_failed",
+                error.GetType().Name,
+                "ping payload omitted");
             lifetime.Cancel();
         }
     }
+
+    private void LogRegistrationRejected(string instanceId, int processId, string errorCode, double elapsedMs) =>
+        logger.LogWarning(ServerLogEvents.RegistrationRejected,
+            "Game registration rejected; instanceId={InstanceId}; processId={ProcessId}; elapsedMs={ElapsedMs}; outcome={Outcome}; errorCode={ErrorCode}; resultSummary={ResultSummary}.",
+            instanceId,
+            processId,
+            Math.Round(elapsedMs, 3),
+            "rejected",
+            ServerLogSummary.SanitizeText(errorCode),
+            "registration metadata omitted");
 
     private static async Task RejectSocketAsync(WebSocket socket, string code, string message)
     {
@@ -296,9 +436,16 @@ public sealed class GameInstanceRegistry(ILogger<GameInstanceRegistry> logger)
     {
         if (_instances.TryGetValue(connection.InstanceId, out var current) && ReferenceEquals(current, connection))
         {
-            connection.DisconnectedAtUtc = DateTimeOffset.UtcNow;
+            var disconnectedAt = DateTimeOffset.UtcNow;
+            connection.DisconnectedAtUtc = disconnectedAt;
             connection.FailPending("The game WebSocket disconnected.");
-            logger.LogInformation("Game instance {InstanceId} disconnected.", connection.InstanceId);
+            logger.LogInformation(ServerLogEvents.GameInstanceDisconnected,
+                "Game instance {InstanceId} (PID {ProcessId}) disconnected after {ElapsedMs} ms; outcome={Outcome}; resultSummary={ResultSummary}.",
+                connection.InstanceId,
+                connection.ProcessId,
+                Math.Round((disconnectedAt - connection.RegisteredAtUtc).TotalMilliseconds, 3),
+                "disconnected",
+                "websocket closed; pending commands failed");
         }
     }
 
@@ -346,20 +493,23 @@ public sealed class GameInstanceRegistry(ILogger<GameInstanceRegistry> logger)
                 : JsonDocument.Parse("{}").RootElement.Clone();
             var error = message.TryGetProperty("error", out var errorElement)
                 ? ReadCommandError(errorElement)
-                : null;
-            pending.Completion.TrySetResult(new GameCommandResponse(ok, result, error));
+                : new GameCommandError(null, null, null);
+            pending.Completion.TrySetResult(new GameCommandResponse(ok, result, error.Text, error.Code, error.MessageLength));
             return;
         }
 
         throw new InvalidDataException($"Unsupported client message type '{type}'.");
     }
 
-    private static string? ReadCommandError(JsonElement error)
+    private static GameCommandError ReadCommandError(JsonElement error)
     {
         if (error.ValueKind == JsonValueKind.String)
-            return error.GetString();
+        {
+            var text = error.GetString();
+            return new GameCommandError(text, null, text?.Length);
+        }
         if (error.ValueKind != JsonValueKind.Object)
-            return null;
+            return new GameCommandError(null, null, null);
 
         var code = error.TryGetProperty("code", out var codeValue) && codeValue.ValueKind == JsonValueKind.String
             ? codeValue.GetString()
@@ -368,8 +518,11 @@ public sealed class GameInstanceRegistry(ILogger<GameInstanceRegistry> logger)
             ? messageValue.GetString()
             : null;
         if (string.IsNullOrWhiteSpace(message))
-            return string.IsNullOrWhiteSpace(code) ? "The game plugin reported a command error." : $"Game plugin error ({code}).";
-        return string.IsNullOrWhiteSpace(code) ? message : $"{code}: {message}";
+            return new GameCommandError(
+                string.IsNullOrWhiteSpace(code) ? "The game plugin reported a command error." : $"Game plugin error ({code}).",
+                code,
+                null);
+        return new GameCommandError(string.IsNullOrWhiteSpace(code) ? message : $"{code}: {message}", code, message.Length);
     }
 
     private static bool TryReadRegistration(JsonElement element, out GameRegistration? registration, out string? error)
@@ -498,7 +651,8 @@ public sealed record GameInstanceView(
     long LastSequence,
     JsonElement State);
 
-internal sealed record GameCommandResponse(bool Ok, JsonElement Result, string? Error);
+internal sealed record GameCommandResponse(bool Ok, JsonElement Result, string? Error, string? ErrorCode, int? ErrorMessageLength);
+internal sealed record GameCommandError(string? Text, string? Code, int? MessageLength);
 
 internal sealed class GameConnection(GameRegistration registration, WebSocket socket)
 {
@@ -511,6 +665,7 @@ internal sealed class GameConnection(GameRegistration registration, WebSocket so
     public WebSocket Socket { get; } = socket;
     public SemaphoreSlim SendLock { get; } = new(1, 1);
     public ConcurrentDictionary<string, GameInstanceRegistry.PendingCommand> Pending { get; } = new(StringComparer.Ordinal);
+    public DateTimeOffset RegisteredAtUtc { get; } = DateTimeOffset.UtcNow;
     public DateTimeOffset LastHeartbeatUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? DisconnectedAtUtc { get; set; }
     public long LastSequence { get; set; }
