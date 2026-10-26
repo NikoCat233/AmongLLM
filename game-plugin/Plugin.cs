@@ -291,6 +291,8 @@ public sealed class BridgeBehaviour : MonoBehaviour
         {
             gameVersion = RuntimeInfo.GameVersion,
             pluginVersion = Plugin.PluginVersion,
+            processId = Environment.ProcessId,
+            workingDirectory = Environment.CurrentDirectory,
             platformType = Constants.GetPlatformType().ToString(),
             scene = SceneManager.GetActiveScene().name,
             frame = Time.frameCount,

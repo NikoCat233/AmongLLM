@@ -44,6 +44,9 @@ public sealed class BridgeIntegrationTests
             var waitUntil = DateTime.UtcNow.AddSeconds(5);
             while (!plugin.IsActive && DateTime.UtcNow < waitUntil) await Task.Delay(10);
             Assert.True(plugin.IsActive);
+            var instance = app.Services.GetRequiredService<GameInstanceRegistry>().GetInstance(SocketClient.InstanceId);
+            Assert.Equal(Environment.ProcessId, instance.ProcessId);
+            Assert.Equal(Environment.CurrentDirectory, instance.WorkingDirectory);
             plugin.CurrentSession!.TrySend(new { type = "heartbeat", instanceId = SocketClient.InstanceId, seq = 1, state = new { scene = "TestScene" } });
             using var http = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}") };
             http.DefaultRequestHeaders.Accept.ParseAdd("application/json, text/event-stream");

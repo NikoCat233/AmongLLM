@@ -272,7 +272,8 @@ public sealed class GameInstanceRegistry(ILogger<GameInstanceRegistry> logger)
             using var instanceScope = logger.BeginScope(new Dictionary<string, object?>
             {
                 ["instanceId"] = connection.InstanceId,
-                ["processId"] = connection.ProcessId
+                ["processId"] = connection.ProcessId,
+                ["workingDirectory"] = connection.WorkingDirectory
             });
             logger.LogInformation(
                 isReconnect ? ServerLogEvents.GameInstanceReconnected : ServerLogEvents.GameInstanceRegistered,
@@ -545,6 +546,8 @@ public sealed class GameInstanceRegistry(ILogger<GameInstanceRegistry> logger)
                 throw new InvalidDataException("instanceId must be a GUID.");
             if (registration.ProcessId <= 0)
                 throw new InvalidDataException("processId must be positive.");
+            if (string.IsNullOrWhiteSpace(registration.WorkingDirectory) || registration.WorkingDirectory.Length > 32768 || !Path.IsPathFullyQualified(registration.WorkingDirectory))
+                throw new InvalidDataException("workingDirectory must be a fully qualified directory path.");
             if (registration.GameVersion is null || registration.ModVersion is null || registration.PlatformType is null ||
                 registration.GameVersion.Length > 128 || registration.ModVersion.Length > 128 || registration.PlatformType.Length > 64)
                 throw new InvalidDataException("Registration metadata exceeds the supported length.");
@@ -633,6 +636,7 @@ public sealed record GameRegistration
     public int ProtocolVersion { get; init; }
     public string InstanceId { get; init; } = "";
     public int ProcessId { get; init; }
+    public string WorkingDirectory { get; init; } = "";
     public string GameVersion { get; init; } = "unknown";
     public string ModVersion { get; init; } = "unknown";
     public string PlatformType { get; init; } = "unknown";
@@ -642,6 +646,7 @@ public sealed record GameRegistration
 public sealed record GameInstanceView(
     string InstanceId,
     int ProcessId,
+    string WorkingDirectory,
     string GameVersion,
     string ModVersion,
     string PlatformType,
@@ -658,6 +663,7 @@ internal sealed class GameConnection(GameRegistration registration, WebSocket so
 {
     public string InstanceId => registration.InstanceId;
     public int ProcessId => registration.ProcessId;
+    public string WorkingDirectory => registration.WorkingDirectory;
     public string GameVersion => registration.GameVersion;
     public string ModVersion => registration.ModVersion;
     public string PlatformType => registration.PlatformType;
@@ -675,7 +681,7 @@ internal sealed class GameConnection(GameRegistration registration, WebSocket so
         Socket.State == WebSocketState.Open && DisconnectedAtUtc is null && now - LastHeartbeatUtc <= expiry;
 
     public GameInstanceView ToView(DateTimeOffset now, TimeSpan expiry) => new(
-        InstanceId, ProcessId, GameVersion, ModVersion, PlatformType, Capabilities,
+        InstanceId, ProcessId, WorkingDirectory, GameVersion, ModVersion, PlatformType, Capabilities,
         LastHeartbeatUtc, IsOnline(now, expiry), LastSequence, State.Clone());
 
     public async Task SendAsync<T>(T message, CancellationToken cancellationToken)

@@ -47,6 +47,17 @@ public sealed class GameInstanceRegistryTests : IAsyncLifetime
     public async Task DisposeAsync() => await _app.DisposeAsync();
 
     [Fact]
+    public async Task RejectsRegistrationWithRelativeWorkingDirectory()
+    {
+        using var client = await ConnectAsync();
+        var instanceId = Guid.NewGuid().ToString("D");
+        await SendJsonAsync(client, new { type = "register", protocolVersion = 1, instanceId, processId = Environment.ProcessId, workingDirectory = "relative/game" });
+        using var response = await ReceiveJsonAsync(client);
+        Assert.Equal("error", response.RootElement.GetProperty("type").GetString());
+        Assert.DoesNotContain(_registry.ListInstances(), instance => instance.InstanceId == instanceId);
+    }
+
+    [Fact]
     public async Task RegistersMultipleInstancesAndCorrelatesSequenceProgressAndResponse()
     {
         using var first = await ConnectAsync();
@@ -61,6 +72,8 @@ public sealed class GameInstanceRegistryTests : IAsyncLifetime
         await WaitUntilAsync(() => _registry.ListInstances().Count == 2 && _registry.GetInstance(firstId).Online && _registry.GetInstance(secondId).Online);
         Assert.Equal(2, _registry.ListInstances().Count);
         Assert.Equal("MainMenu", _registry.GetInstance(firstId).State.GetProperty("scene").GetString());
+        Assert.Equal(Environment.ProcessId, _registry.GetInstance(firstId).ProcessId);
+        Assert.Equal(Environment.CurrentDirectory, _registry.GetInstance(firstId).WorkingDirectory);
 
         var progressSource = new TaskCompletionSource<ModelContextProtocol.ProgressNotificationValue>(TaskCreationOptions.RunContinuationsAsynchronously);
         var progress = new InlineProgress<ModelContextProtocol.ProgressNotificationValue>(value => progressSource.TrySetResult(value));
@@ -175,6 +188,7 @@ public sealed class GameInstanceRegistryTests : IAsyncLifetime
             protocolVersion = 1,
             instanceId,
             processId = Environment.ProcessId + 1,
+            workingDirectory = Environment.CurrentDirectory,
             gameVersion = "test",
             modVersion = "test",
             platformType = "test",
@@ -385,6 +399,7 @@ public sealed class GameInstanceRegistryTests : IAsyncLifetime
             protocolVersion = 1,
             instanceId,
             processId = Environment.ProcessId,
+            workingDirectory = Environment.CurrentDirectory,
             gameVersion = "test",
             modVersion = "test",
             platformType = "test",

@@ -20,10 +20,12 @@ Register an HTTP MCP server at either `http://127.0.0.1:26767/mcp` or `http://12
 The first WebSocket frame must be a JSON registration:
 
 ```json
-{"type":"register","protocolVersion":1,"instanceId":"00000000-0000-0000-0000-000000000001","processId":1234,"gameVersion":"2026.9.29","modVersion":"1.0.0","platformType":"Itch","capabilities":["capture_screenshot","click_sequence"]}
+{"type":"register","protocolVersion":1,"instanceId":"00000000-0000-0000-0000-000000000001","processId":1234,"workingDirectory":"D:\\Game\\20260929","gameVersion":"2026.9.29","modVersion":"1.0.0","platformType":"Itch","capabilities":["capture_screenshot","click_sequence"]}
 ```
 
 The server responds with `registered`, its `serverId`, and the instance ID. A rejected registration receives `{ "type":"error", "error":{"code":"...","message":"..."} }` before the server closes the socket. Plugins send `heartbeat` frames with a monotonically increasing `seq` and a structured `state`. The server expires instances after 15 seconds without a heartbeat and sends a `ping` every five seconds. A plugin may answer with `pong`.
+
+Registration requires a positive `processId` and a fully qualified `workingDirectory`. Both are retained in `list_instances` / `get_game_status` so agents can manage the correct process and checkout; the connection log includes them as structured fields.
 
 Commands have a unique `id`, `operation`, `payload`, and UTC `deadlineUtc`. Plugins answer with a matching `response` frame whose `error` is `{ "code":"...", "message":"..." }` on failure. Long operations may send matching `progress` frames with `progress`, optional `total`, and `message`. Commands are serialized per game instance, including across reconnects, and the deadline includes time spent waiting for that slot. A timeout or client cancellation sends `{ "type":"cancel", "id":"...", "reason":"timeout|client" }` when the socket allows it. The plugin should stop queued or active work with that ID. Cancellation is best effort after an operation has started, and the server never replays an action.
 

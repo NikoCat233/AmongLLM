@@ -122,6 +122,7 @@ internal sealed class SocketClient
         protocolVersion = 1,
         instanceId = InstanceId,
         processId = Environment.ProcessId,
+        workingDirectory = Environment.CurrentDirectory,
         gameVersion = RuntimeInfo.GameVersion,
         modVersion = Plugin.PluginVersion,
         platformType = RuntimeInfo.PlatformType,
