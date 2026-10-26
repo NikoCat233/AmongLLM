@@ -1,0 +1,18 @@
+# .NET build output
+**/bin/
+**/obj/
+**/TestResults/
+.vs/
+*.user
+*.suo
+
+# Local credentials and runtime data
+.env
+.env.*
+!.env.example
+**/logs/
+**/captures/
+**/runtime-data/
+**/requests/
+**/responses/
+*.log
