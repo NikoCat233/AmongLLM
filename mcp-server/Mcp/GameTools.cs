@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using ModelContextProtocol;
@@ -175,20 +176,34 @@ public sealed class GameTools
         JsonSerializer.Serialize(await Dispatch(registry, instanceId, "get_account_info", new { includeUserIdToken }, DefaultTimeout, null, cancellationToken), Json);
 
     [McpServerTool(Name = "set_itch_auth_token_and_login", Destructive = true)]
-    [Description("On an Itch client only, replace EOSManager.platformAuthToken with the supplied Itch API key and call LoginWithCorrectPlatform. Never call for other platform types.")]
+    [Description("On an Itch client only, replace EOSManager.platformAuthToken with the supplied Itch API key and call LoginWithCorrectPlatform. Automatically handle first-sign-in account creation, login-success confirmation and friend-code registration. If age verification is requested, dateOfBirth defaults to the user's supplied date, 2000-04-04, and is submitted through the game's native validation. Never call for other platform types.")]
     public static async Task<string> SetItchAuthTokenAndLogin(
         [Description("Registered game instance GUID.")] string instanceId,
         [Description("Itch API key to use as the platform auth token. Do not include this value in logs or prompts.")] string platformAuthToken,
         GameInstanceRegistry registry,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [Description("Actual date of birth for an age-verification prompt, formatted yyyy-MM-dd. Defaults to the date the user supplied, 2000-04-04. Must be a real date from 1901 through last year in UTC. Pass null to disable automatic age submission. Never provide an estimated or fabricated date.")] string? dateOfBirth = "2000-04-04")
     {
         if (string.IsNullOrWhiteSpace(platformAuthToken) || platformAuthToken.Length > 8192)
             throw new McpException("platformAuthToken must contain 1 to 8192 characters.");
 
+        if (dateOfBirth is not null && !IsSupportedDateOfBirth(dateOfBirth))
+            throw new McpException("dateOfBirth must be a valid real date formatted yyyy-MM-dd, from 1901 through last year in UTC.");
+
+        var payload = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["platformAuthToken"] = platformAuthToken,
+            ["dateOfBirth"] = dateOfBirth
+        };
+
         var result = await Dispatch(registry, instanceId, "set_itch_auth_token_and_login",
-            new { platformAuthToken }, TimeSpan.FromSeconds(90), null, cancellationToken);
+            payload, TimeSpan.FromSeconds(95), null, cancellationToken);
         return JsonSerializer.Serialize(result, Json);
     }
+
+    private static bool IsSupportedDateOfBirth(string value) =>
+        DateOnly.TryParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date) &&
+        date.Year is >= 1901 && date.Year <= DateTime.UtcNow.Year - 1;
 
     [McpServerTool(Name = "send_chat_message", Destructive = true)]
     [Description("Send a chat message as the local player using the game's chat RPC.")]

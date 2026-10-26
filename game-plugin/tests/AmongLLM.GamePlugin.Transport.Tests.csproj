@@ -21,5 +21,6 @@
     <Compile Include="..\PropertyPath.cs" Link="PropertyPath.cs" />
     <Compile Include="..\UnityThreadContext.cs" Link="UnityThreadContext.cs" />
     <Compile Include="..\ButtonWait.cs" Link="ButtonWait.cs" />
+    <Compile Include="..\ItchLoginFlow.cs" Link="ItchLoginFlow.cs" />
   </ItemGroup>
 </Project>

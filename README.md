@@ -43,7 +43,7 @@ Among Us 游戏控制桥：一个本机 HTTP MCP server，以及与之配套的 
 
 房主可以读写房间内所有已注册网络对象，并对其他玩家 SnapTo。普通客户端可以读取对象，写入和 RPC 限于自己拥有的对象。属性修改返回本地读回结果；要同步给其他玩家，需要调用游戏对应的 RPC 或序列化路径。
 
-Itch 账号切换在运行时检查 `Platforms.StandaloneItch`，将 Itch API key 写入 `EOSManager.platformAuthToken` 后直接执行 `LoginWithCorrectPlatform()`。实际 interop 把原始 private 字段生成为带 IL2CPP 写屏障的访问属性。只有登录流程完成且 `LoginStatus == LoggedIn` 才返回成功。Steam 源码中的平台常量不用于替代目标游戏的运行时判断。
+Itch 账号切换在运行时检查 `Platforms.StandaloneItch`，将 Itch API key 写入 `EOSManager.platformAuthToken` 后执行 `LoginWithCorrectPlatform()`。命令内部自动处理出生日期弹窗（默认重填用户指定的 `2000-04-04`，可用 `dateOfBirth` 指定其他真实日期）、首次 Sign In、登录成功确认和好友代码注册。日期通过游戏原有校验提交，好友代码使用游戏随机生成的名字并等待服务端保存成功。只有登录流程完成、`LoginStatus == LoggedIn` 且相关弹窗和好友代码步骤处理完毕才返回成功；失败和超时会说明所处阶段。取消后停止后续自动操作，同 token 可续接本插件发起的未完成登录。实际 interop 把原始 private 字段生成为带 IL2CPP 写屏障的访问属性。
 
 `send_rpc` 直接使用 `StartRpcImmediately` / `FinishRpcImmediately`。`send_hazel_message` 接受完整的类型化 writer 指令，包含原始 Hazel 标签嵌套。C# 片段在游戏进程内运行；正常异步续体回到 Unity 主线程，超时不能安全中断同步死循环。
 

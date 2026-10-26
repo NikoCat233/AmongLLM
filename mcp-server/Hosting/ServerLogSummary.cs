@@ -352,6 +352,7 @@ public static partial class ServerLogSummary
         string.IsNullOrWhiteSpace(value) ? "none" : Bound(SanitizeText(value), 192);
 
     private static bool IsSensitiveName(string value) =>
+        value.Contains("dateofbirth", StringComparison.OrdinalIgnoreCase) ||
         value.Contains("token", StringComparison.OrdinalIgnoreCase) ||
         value.Contains("auth", StringComparison.OrdinalIgnoreCase) ||
         value.Contains("secret", StringComparison.OrdinalIgnoreCase) ||

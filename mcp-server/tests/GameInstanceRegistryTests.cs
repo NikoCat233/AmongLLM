@@ -374,6 +374,12 @@ public sealed class GameInstanceRegistryTests : IAsyncLifetime
         await setText;
 
         var apiKey = "test-itch-key-never-log";
+        foreach (var invalidDate in new[] { "1900-12-31", $"{DateTime.UtcNow.Year:0000}-01-01", "2000-02-30", "02/03/2000" })
+        {
+            var invalidLogin = GameTools.SetItchAuthTokenAndLogin(instanceId, apiKey, _registry, CancellationToken.None, invalidDate);
+            await Assert.ThrowsAsync<McpException>(async () => await invalidLogin);
+        }
+
         var login = GameTools.SetItchAuthTokenAndLogin(instanceId, apiKey, _registry, CancellationToken.None);
         using (var command = await ReceiveJsonAsync(client))
         {
@@ -381,14 +387,42 @@ public sealed class GameInstanceRegistryTests : IAsyncLifetime
             Assert.Equal("set_itch_auth_token_and_login", command.RootElement.GetProperty("operation").GetString());
             Assert.Equal(apiKey, payload.GetProperty("platformAuthToken").GetString());
             Assert.False(payload.TryGetProperty("authToken", out _));
+            Assert.Equal("2000-04-04", payload.GetProperty("dateOfBirth").GetString());
             await SendJsonAsync(client, new { type = "response", id = command.RootElement.GetProperty("id").GetString(), ok = true, result = new { loginStatus = "LoggedIn" } });
         }
         await login;
+
+        var omittedDateLogin = GameTools.SetItchAuthTokenAndLogin(instanceId, apiKey, _registry, CancellationToken.None, null);
+        using (var command = await ReceiveJsonAsync(client))
+        {
+            var payload = command.RootElement.GetProperty("payload");
+            Assert.True(payload.TryGetProperty("dateOfBirth", out var omittedDate));
+            Assert.Equal(JsonValueKind.Null, omittedDate.ValueKind);
+            await SendJsonAsync(client, new { type = "response", id = command.RootElement.GetProperty("id").GetString(), ok = true, result = new { loginStatus = "LoggedIn" } });
+        }
+        await omittedDateLogin;
+
+        var dateOfBirth = "1998-02-03";
+        var loginWithDate = GameTools.SetItchAuthTokenAndLogin(instanceId, apiKey, _registry, CancellationToken.None, dateOfBirth);
+        using (var command = await ReceiveJsonAsync(client))
+        {
+            var payload = command.RootElement.GetProperty("payload");
+            Assert.Equal("set_itch_auth_token_and_login", command.RootElement.GetProperty("operation").GetString());
+            Assert.Equal(apiKey, payload.GetProperty("platformAuthToken").GetString());
+            Assert.Equal(dateOfBirth, payload.GetProperty("dateOfBirth").GetString());
+            Assert.False(payload.TryGetProperty("authToken", out _));
+            await SendJsonAsync(client, new { type = "response", id = command.RootElement.GetProperty("id").GetString(), ok = true, result = new { loginStatus = "LoggedIn" } });
+        }
+        await loginWithDate;
+
         var authLogText = string.Join("\n", _logProvider.Entries
             .Where(entry => entry.Values.TryGetValue("Operation", out var operation) && Equals(operation, "set_itch_auth_token_and_login"))
             .SelectMany(entry => entry.Values.Values.Select(value => value?.ToString() ?? "").Append(entry.Message)));
         Assert.DoesNotContain(apiKey, authLogText, StringComparison.Ordinal);
+        Assert.DoesNotContain(dateOfBirth, authLogText, StringComparison.Ordinal);
+        Assert.DoesNotContain("2000-04-04", authLogText, StringComparison.Ordinal);
         Assert.DoesNotContain("platformAuthToken", authLogText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("dateOfBirth", authLogText, StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<ClientWebSocket> ConnectAsync()

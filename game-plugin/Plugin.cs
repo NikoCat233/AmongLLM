@@ -61,6 +61,7 @@ public sealed class BridgeBehaviour : MonoBehaviour
     private float nextHeartbeat;
     private long heartbeatSequence;
     private string? lastScreenId;
+    private ItchLoginAutomation? itchLogin;
 
     public BridgeBehaviour(IntPtr pointer) : base(pointer) { }
 
@@ -219,7 +220,8 @@ public sealed class BridgeBehaviour : MonoBehaviour
                 setResult(GetAccountInfo(GetBool(p, "includeUserIdToken")));
                 return null;
             case "set_itch_auth_token_and_login":
-                return SetItchTokenAndLogin(GetString(p, "platformAuthToken"), setResult);
+                return SetItchTokenAndLogin(GetString(p, "platformAuthToken"),
+                    p.TryGetProperty("dateOfBirth", out var birthDate) ? birthDate.GetString() : ItchLoginFlow.DefaultDateOfBirth, setResult);
             case "send_chat_message":
                 setResult(SendChatMessage(GetString(p, "message")));
                 return null;
@@ -441,27 +443,47 @@ public sealed class BridgeBehaviour : MonoBehaviour
         setResult(new { completedSteps = completed, totalSteps = steps.GetArrayLength(), frame = Time.frameCount });
     }
 
-    private IEnumerator SetItchTokenAndLogin(string token, Action<object?> setResult)
+    private IEnumerator SetItchTokenAndLogin(string token, string? birthDate, Action<object?> setResult)
     {
-        if (string.IsNullOrWhiteSpace(token) || token.Length > 16384) throw new InvalidOperationException("authToken is required and must be at most 16384 characters.");
+        if (string.IsNullOrWhiteSpace(token) || token.Length > 8192) throw new InvalidOperationException("platformAuthToken is required and must be at most 8192 characters.");
+        DateTime? dateOfBirth = ItchLoginFlow.ParseBirthDate(birthDate);
         if (Constants.GetPlatformType() != Platforms.StandaloneItch) throw new InvalidOperationException("Account switching is available only when the runtime platform is Itch.");
         AmongUsClient? client = AmongUsClient.Instance;
         if (client && client.AmConnected) throw new InvalidOperationException("Leave the current room before switching the EOS platform account.");
         EOSManager eos = DestroyableSingleton<EOSManager>.Instance;
-        if (eos.tryingToLogin) throw new InvalidOperationException("An EOS login is already in progress. Wait for it to finish before switching accounts.");
-        SetPlatformAuthToken(eos, token);
-        eos.LoginWithCorrectPlatform();
+        if (itchLogin != null && itchLogin.CanResume(eos, token))
+        {
+            // Resume only a login started by this bridge, with the same token.
+            // Preserve submission flags so retries never duplicate backend writes.
+            itchLogin.SetBirthDate(dateOfBirth);
+        }
+        else
+        {
+            if (eos.tryingToLogin)
+                throw new InvalidOperationException("Another EOS login is already in progress. Wait for it to finish before switching accounts.");
+            SetPlatformAuthToken(eos, token);
+            itchLogin = new ItchLoginAutomation(eos, dateOfBirth);
+            itchLogin.PrepareNewLogin();
+            // Never accept the previous account's friend code as completion.
+            eos.FriendCode = null;
+            // The game's invalid-user callback only assigns this when null.
+            // A previous account's continuance token cannot create the new one.
+            eos.continuanceToken = null;
+            eos.LoginWithCorrectPlatform();
+        }
+        ItchLoginAutomation automation = itchLogin;
         float deadline = Time.realtimeSinceStartup + 90f;
         while (Time.realtimeSinceStartup < deadline)
         {
-            if (eos.HasFinishedLoginFlow() && DataManager.Player.Account.LoginStatus == EOSManager.AccountLoginStatus.LoggedIn)
+            if (automation.Advance())
             {
+                itchLogin = null;
                 setResult(new { success = true, account = GetAccountInfo(includeToken: false) });
                 yield break;
             }
             yield return null;
         }
-        throw new TimeoutException("LoginWithCorrectPlatform did not reach HasFinishedLoginFlow and LoggedIn within 90 seconds.");
+        throw new TimeoutException($"Login did not complete within 90 seconds (stage: {automation.Stage}). Inspect account status before retrying; retrying the same token can resume this bridge's pending login.");
     }
 
     private static void SetPlatformAuthToken(EOSManager eos, string token)
