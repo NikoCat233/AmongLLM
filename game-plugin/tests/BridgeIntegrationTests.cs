@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -32,9 +33,11 @@ public sealed class BridgeIntegrationTests
         await app.StartAsync();
         int port = new Uri(app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single()).Port;
         var observedCommand = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var observedCommands = new ConcurrentQueue<JsonElement>();
         var plugin = new SocketClient((command, session) =>
         {
             if (command.GetProperty("type").GetString() != "command") return;
+            observedCommands.Enqueue(command.Clone());
             observedCommand.TrySetResult(command.Clone());
             session.TrySend(new { type = "response", id = command.GetProperty("id").GetString(), ok = true, result = new { submitted = true } });
         }, _ => { }, new SocketClientOptions { Ports = new[] { port } });
@@ -64,6 +67,8 @@ public sealed class BridgeIntegrationTests
             Assert.Contains("send_rpc", names);
             Assert.Contains("send_hazel_message", names);
             Assert.Contains("read_game_logs", names);
+            foreach (var name in new[] { "list_game_servers", "set_game_server", "host_game", "join_game", "get_room_status" })
+                Assert.Contains(name, names);
             using var callResponse = await http.PostAsJsonAsync("/mcp", new { jsonrpc = "2.0", id = 3, method = "tools/call", @params = new { name = "send_rpc", arguments = new { instanceId = SocketClient.InstanceId, targetNetId = 1, callId = 2, sendOption = "Reliable", targetClientId = -1, fields = Array.Empty<object>() } } });
             callResponse.EnsureSuccessStatusCode();
             using var result = ReadRpc(await callResponse.Content.ReadAsStringAsync());
@@ -71,6 +76,24 @@ public sealed class BridgeIntegrationTests
             var observed = await observedCommand.Task.WaitAsync(TimeSpan.FromSeconds(3));
             Assert.Equal("send_rpc", observed.GetProperty("operation").GetString());
             Assert.Equal(1u, observed.GetProperty("payload").GetProperty("targetNetId").GetUInt32());
+            var roomTools = new (string Name, object Arguments)[]
+            {
+                ("list_game_servers", new { instanceId = SocketClient.InstanceId }),
+                ("set_game_server", new { instanceId = SocketClient.InstanceId, serverIndex = 2 }),
+                ("host_game", new { instanceId = SocketClient.InstanceId }),
+                ("join_game", new { instanceId = SocketClient.InstanceId, gameCode = "ABCDEF" }),
+                ("get_room_status", new { instanceId = SocketClient.InstanceId })
+            };
+            foreach (var (name, arguments) in roomTools)
+            {
+                using var response = await http.PostAsJsonAsync("/mcp", new { jsonrpc = "2.0", id = name, method = "tools/call", @params = new { name, arguments } });
+                response.EnsureSuccessStatusCode();
+                using var rpc = ReadRpc(await response.Content.ReadAsStringAsync());
+                Assert.False(rpc.RootElement.GetProperty("result").TryGetProperty("isError", out var roomError) && roomError.GetBoolean());
+            }
+            var dispatched = observedCommands.ToArray();
+            Assert.Equal(roomTools.Select(tool => tool.Name), dispatched.Skip(1).Select(command => command.GetProperty("operation").GetString()));
+            Assert.Equal("Normal", dispatched[3].GetProperty("payload").GetProperty("gameMode").GetString());
         }
         finally
         {

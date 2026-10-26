@@ -30,6 +30,7 @@ Among Us 游戏控制桥：一个本机 HTTP MCP server，以及与之配套的 
 | 类别 | 工具 |
 | --- | --- |
 | 多实例与状态 | `list_instances`、`get_game_status` |
+| 服务器与房间 | `list_game_servers`、`set_game_server`、`host_game`、`join_game`、`get_room_status` |
 | 游戏画面与窗口 | `capture_game_screenshot`、`set_window_state` |
 | 结构化 UI | `get_screen`、`set_text`、`click_button`、`click_sequence` |
 | 账号 | `get_account_info`、`set_itch_auth_token_and_login` |
@@ -38,6 +39,8 @@ Among Us 游戏控制桥：一个本机 HTTP MCP server，以及与之配套的 
 | 诊断与扩展 | `execute_csharp`、`list_loaded_mods`、`read_game_logs` |
 
 所有游戏命令指定 `instanceId`。点击序列支持依次点击、固定等待和等待按钮出现；单个游戏实例中的命令按顺序执行。断线、取消和超时会停止尚未执行的步骤，已完成的操作不会自动重放。
+
+创建或加入房间时，先调用 `list_game_servers` 取得当前实例的服务器序号，再用 `set_game_server` 选择目标服务器，然后调用 `host_game`（默认 Normal，可选 HideNSeek）或 `join_game`（接收 4 或 6 位房间代码）。创建和加入通过游戏原生 `PSManager` 流程执行，成功后返回房间代码或客户端 ID；原生流程会在需要时退出当前房间。`get_room_status` 实时列出按 client ID 排序的玩家，包含 PUID、好友代码、玩家 ID、外观、等级、位置、角色类型、死亡与房主状态。服务器序号由当前可用区域列表确定；区域名称是跨列表更新更稳定的标识。
 
 每个 `click` / `waitForButton` 步骤应由 agent 明确给出 `timeoutMs`，省略时默认 5000 毫秒；按钮在上限内未出现就停止序列。注册、实例列表与状态中包含客户端的 `processId` 和 `workingDirectory`，便于定位进程和目录。
 

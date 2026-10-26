@@ -64,12 +64,17 @@ Typed fields support `bool`, `byte`, `sbyte`, `int16`, `uint16`, `int32`, `uint3
 
 ## Tools
 
-- Instance and state: `list_instances`, `get_game_status`
+- Instance and state: `list_instances`, `get_game_status`, `get_room_status`
+- Servers and rooms: `list_game_servers`, `set_game_server`, `host_game`, `join_game`
 - Display and UI: `capture_game_screenshot`, `set_window_state`, `get_screen`, `set_text`, `click_button`, `click_sequence`
 - Account: `get_account_info`, `set_itch_auth_token_and_login`
 - Game actions: `send_chat_message`, `send_rpc`, `send_hazel_message`, `snap_to`
 - Object and code inspection: `list_net_objects`, `read_net_object_properties`, `write_net_object_property`, `execute_csharp`
 - Diagnostics: `list_loaded_mods`, `read_game_logs`
+
+Before creating or joining an online room, call `list_game_servers(instanceId)` and select the target server using its returned `serverIndex` with `set_game_server`. Then call `host_game(instanceId, gameMode?)` or `join_game(instanceId, gameCode)`. The default host mode is `Normal`; `HideNSeek` is also supported. Join takes a four or six letter room code. Host and join use the game's `PSManager` coroutine and return only after a joined room is observed, with a 60-second command deadline. The native flow may leave an existing room. A timed-out call has an unknown outcome; inspect `get_room_status` or `get_game_status` before retrying. Server indexes are deterministic for the current list, while the region name is the durable identity if the list changes.
+
+`get_room_status` reads the current `GameData` roster live. Its `players` array is sorted by `clientId`; each entry includes `isHost`, PUID, friend code, `playerId`, level, all available outfits, position when a PlayerControl exists, `roleType`, `isDead`, and a `playerInfo` summary. `playerInfoReady` is false while game data has not been created.
 
 ## Server logs
 

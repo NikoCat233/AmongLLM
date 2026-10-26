@@ -29,6 +29,62 @@ public sealed class GameTools
         GameInstanceRegistry registry) =>
         JsonSerializer.Serialize(registry.GetInstance(instanceId), Json);
 
+    [McpServerTool(Name = "list_game_servers", ReadOnly = true)]
+    [Description("List available regions with deterministic server indexes for the current list. Call this before set_game_server and host_game.")]
+    public static async Task<string> ListGameServers(
+        [Description("Registered game instance GUID.")] string instanceId,
+        GameInstanceRegistry registry,
+        CancellationToken cancellationToken) =>
+        JsonSerializer.Serialize(await Dispatch(registry, instanceId, "list_game_servers", new { }, DefaultTimeout, null, cancellationToken), Json);
+
+    [McpServerTool(Name = "set_game_server", Destructive = true)]
+    [Description("Select and persist a game region by the server index returned by the current list_game_servers result.")]
+    public static async Task<string> SetGameServer(
+        [Description("Registered game instance GUID.")] string instanceId,
+        [Description("Server index returned by list_game_servers for this game instance.")] int serverIndex,
+        GameInstanceRegistry registry,
+        CancellationToken cancellationToken)
+    {
+        if (serverIndex < 0)
+            throw new McpException("serverIndex must be a nonnegative index returned by list_game_servers.");
+        return JsonSerializer.Serialize(await Dispatch(registry, instanceId, "set_game_server", new { serverIndex }, DefaultTimeout, null, cancellationToken), Json);
+    }
+
+    [McpServerTool(Name = "host_game", Destructive = true)]
+    [Description("Create an online game on the selected region through PSManager.CreateGame. First call list_game_servers and set_game_server. Returns the resulting room code when creation completes.")]
+    public static async Task<string> HostGame(
+        [Description("Registered game instance GUID.")] string instanceId,
+        GameInstanceRegistry registry,
+        CancellationToken cancellationToken,
+        [Description("Game mode: Normal or HideNSeek. Defaults to Normal.")] string gameMode = "Normal")
+    {
+        if (gameMode is not ("Normal" or "HideNSeek"))
+            throw new McpException("gameMode must be Normal or HideNSeek.");
+        return JsonSerializer.Serialize(await Dispatch(registry, instanceId, "host_game", new { gameMode }, LongTimeout, null, cancellationToken), Json);
+    }
+
+    [McpServerTool(Name = "join_game", Destructive = true)]
+    [Description("First call list_game_servers and set_game_server to select the target server, then join an online room by its game code through PSManager.JoinGameFromCode.")]
+    public static async Task<string> JoinGame(
+        [Description("Registered game instance GUID.")] string instanceId,
+        [Description("Human-readable Among Us room code.")] string gameCode,
+        GameInstanceRegistry registry,
+        CancellationToken cancellationToken)
+    {
+        var normalizedCode = gameCode?.Trim().ToUpperInvariant();
+        if (normalizedCode is null || normalizedCode.Length is not (4 or 6) || normalizedCode.Any(c => c is < 'A' or > 'Z'))
+            throw new McpException("gameCode must contain four or six ASCII letters.");
+        return JsonSerializer.Serialize(await Dispatch(registry, instanceId, "join_game", new { gameCode = normalizedCode }, LongTimeout, null, cancellationToken), Json);
+    }
+
+    [McpServerTool(Name = "get_room_status", ReadOnly = true)]
+    [Description("Return current room details and all clients sorted by client ID, including identity, player info, outfits, position, role, death and host status.")]
+    public static async Task<string> GetRoomStatus(
+        [Description("Registered game instance GUID.")] string instanceId,
+        GameInstanceRegistry registry,
+        CancellationToken cancellationToken) =>
+        JsonSerializer.Serialize(await Dispatch(registry, instanceId, "get_room_status", new { }, DefaultTimeout, null, cancellationToken), Json);
+
     [McpServerTool(Name = "capture_game_screenshot", ReadOnly = true)]
     [Description("Capture the selected game's current rendered frame and return it as an MCP image.")]
     public static async Task<CallToolResult> CaptureScreenshot(

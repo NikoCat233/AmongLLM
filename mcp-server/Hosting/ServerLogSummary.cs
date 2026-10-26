@@ -14,14 +14,15 @@ public static partial class ServerLogSummary
     private static readonly HashSet<string> SafeNumericProperties = new(StringComparer.OrdinalIgnoreCase)
     {
         "targetNetId", "callId", "targetClientId", "netObjectId", "instanceId", "x", "y", "textBoxInstanceId",
-        "afterSequence", "limit", "timeoutMs", "milliseconds", "frame"
+        "afterSequence", "limit", "timeoutMs", "milliseconds", "frame", "serverIndex"
     };
     private static readonly Dictionary<string, HashSet<string>> SafeEnumProperties = new(StringComparer.OrdinalIgnoreCase)
     {
         ["sendOption"] = new(StringComparer.OrdinalIgnoreCase) { "Reliable", "Unreliable" },
         ["mode"] = new(StringComparer.OrdinalIgnoreCase) { "rpc", "raw" },
         ["state"] = new(StringComparer.OrdinalIgnoreCase) { "foreground", "restore", "background" },
-        ["kind"] = new(StringComparer.OrdinalIgnoreCase) { "click", "wait", "waitForButton" }
+        ["kind"] = new(StringComparer.OrdinalIgnoreCase) { "click", "wait", "waitForButton" },
+        ["gameMode"] = new(StringComparer.OrdinalIgnoreCase) { "Normal", "HideNSeek" }
     };
     private static readonly HashSet<string> RpcNumericTypes = new(StringComparer.Ordinal)
     {

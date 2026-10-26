@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using AmongUs.Data;
+using AmongUs.GameOptions;
 using BepInEx;
 using BepInEx.Bootstrap;
 using BepInEx.Unity.IL2CPP;
@@ -202,6 +203,19 @@ public sealed class BridgeBehaviour : MonoBehaviour
             case "get_game_status":
                 setResult(GetGameStatus(includeAccountToken: false));
                 return null;
+            case "list_game_servers":
+                setResult(ListGameServers());
+                return null;
+            case "set_game_server":
+                setResult(SetGameServer(GetInt(p, "serverIndex")));
+                return null;
+            case "host_game":
+                return HostGame(work, GetString(p, "gameMode"), setResult);
+            case "join_game":
+                return JoinGame(work, GetString(p, "gameCode"), setResult);
+            case "get_room_status":
+                setResult(GetRoomStatus());
+                return null;
             case "get_screen":
                 setResult(GetScreen());
                 return null;
@@ -303,6 +317,197 @@ public sealed class BridgeBehaviour : MonoBehaviour
             eos = GetAccountInfo(includeAccountToken),
             players
         };
+    }
+
+    private static List<IRegionInfo> GetIndexedRegions()
+    {
+        if (!DestroyableSingleton<ServerManager>.InstanceExists)
+            throw new InvalidOperationException("ServerManager is not ready.");
+        var available = DestroyableSingleton<ServerManager>.Instance.AvailableRegions;
+        var regions = new List<IRegionInfo>();
+        for (int i = 0; i < available.Length; i++)
+            if (available[i] is { } region) regions.Add(region);
+        var defaults = ServerManager.DefaultRegions;
+        int DefaultIndex(IRegionInfo region)
+        {
+            for (int i = 0; i < defaults.Length; i++)
+                if (string.Equals(defaults[i].Name, region.Name, StringComparison.OrdinalIgnoreCase)) return i;
+            return defaults.Length;
+        }
+        return regions.OrderBy(DefaultIndex).ThenBy(region => region.Name, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static object DescribeRegion(IRegionInfo region, int serverIndex, bool selected)
+    {
+        var servers = region.Servers;
+        var endpoints = new List<object>();
+        for (int i = 0; i < servers.Length; i++)
+        {
+            var server = servers[i];
+            if (server != null)
+                endpoints.Add(new { name = server.Name, address = server.Ip, port = server.Port, useDtls = server.UseDtls });
+        }
+        return new { serverIndex, name = region.Name, targetServer = region.TargetServer,
+            selected, servers = endpoints };
+    }
+
+    private object ListGameServers()
+    {
+        var manager = DestroyableSingleton<ServerManager>.Instance;
+        var regions = GetIndexedRegions();
+        return new
+        {
+            selectedServerIndex = regions.FindIndex(region => string.Equals(region.Name, manager.CurrentRegion?.Name, StringComparison.OrdinalIgnoreCase)),
+            servers = regions.Select((region, index) => DescribeRegion(region, index,
+                string.Equals(region.Name, manager.CurrentRegion?.Name, StringComparison.OrdinalIgnoreCase))).ToArray()
+        };
+    }
+
+    private object SetGameServer(int serverIndex)
+    {
+        var regions = GetIndexedRegions();
+        if (serverIndex < 0 || serverIndex >= regions.Count)
+            throw new InvalidOperationException("serverIndex is not in the current server list; call list_game_servers again.");
+        var manager = DestroyableSingleton<ServerManager>.Instance;
+        manager.SetRegion(regions[serverIndex]);
+        return DescribeRegion(manager.CurrentRegion, serverIndex, selected: true);
+    }
+
+    private static void EnsureRoomActionReady()
+    {
+        if (!DestroyableSingleton<PSManager>.InstanceExists)
+            throw new InvalidOperationException("PSManager is not ready.");
+        if (!DestroyableSingleton<ServerManager>.InstanceExists || DestroyableSingleton<ServerManager>.Instance.CurrentRegion == null)
+            throw new InvalidOperationException("Select a game server before creating or joining a room.");
+        if (!DestroyableSingleton<EOSManager>.InstanceExists || !DestroyableSingleton<EOSManager>.Instance.HasFinishedLoginFlow() ||
+            DataManager.Player?.Account?.LoginStatus != EOSManager.AccountLoginStatus.LoggedIn)
+            throw new InvalidOperationException("EOS login must finish before creating or joining an online room.");
+        if (!AmongUsClient.Instance)
+            throw new InvalidOperationException("AmongUsClient is not ready.");
+    }
+
+    private IEnumerator HostGame(CommandWork work, string modeName, Action<object?> setResult)
+    {
+        EnsureRoomActionReady();
+        if (!Enum.TryParse<GameModes>(modeName, ignoreCase: false, out var gameMode) ||
+            gameMode is not (GameModes.Normal or GameModes.HideNSeek))
+            throw new InvalidOperationException("gameMode must be Normal or HideNSeek.");
+        var client = AmongUsClient.Instance;
+        int oldGameId = client.AmConnected ? client.GameId : -1;
+        DestroyableSingleton<PSManager>.Instance.CreateGame(gameMode);
+        while (true)
+        {
+            ValidateWork(work);
+            client = AmongUsClient.Instance;
+            if (client && client.AmConnected && client.AmHost && client.ClientId >= 0 &&
+                client.GameState is InnerNetClient.GameStates.Joined or InnerNetClient.GameStates.Started && client.GameId != oldGameId)
+            {
+                setResult(new { created = true, gameCode = GameCode.IntToGameName(client.GameId), gameId = client.GameId,
+                    clientId = client.ClientId, server = DestroyableSingleton<ServerManager>.Instance.CurrentRegion.Name,
+                    gameMode = gameMode.ToString() });
+                yield break;
+            }
+            yield return null;
+        }
+    }
+
+    private IEnumerator JoinGame(CommandWork work, string gameCode, Action<object?> setResult)
+    {
+        EnsureRoomActionReady();
+        if (gameCode.Length is not (4 or 6) || gameCode.Any(c => c is < 'A' or > 'Z'))
+            throw new InvalidOperationException("gameCode must contain four or six ASCII letters.");
+        int targetGameId = GameCode.GameNameToInt(gameCode);
+        if (targetGameId is 0 or -1 || !string.Equals(GameCode.IntToGameName(targetGameId), gameCode, StringComparison.Ordinal))
+            throw new InvalidOperationException("gameCode is not a valid Among Us room code.");
+        var client = AmongUsClient.Instance;
+        if (client.AmConnected && client.GameId == targetGameId && client.ClientId >= 0)
+        {
+            setResult(new { joined = true, alreadyJoined = true, gameCode, gameId = targetGameId, clientId = client.ClientId,
+                isHost = client.AmHost });
+            yield break;
+        }
+        DestroyableSingleton<PSManager>.Instance.JoinGameFromCode(gameCode);
+        while (true)
+        {
+            ValidateWork(work);
+            client = AmongUsClient.Instance;
+            if (client && client.AmConnected && client.GameId == targetGameId && client.ClientId >= 0 &&
+                client.GameState is InnerNetClient.GameStates.Joined or InnerNetClient.GameStates.Started)
+            {
+                setResult(new { joined = true, alreadyJoined = false, gameCode, gameId = targetGameId,
+                    clientId = client.ClientId, isHost = client.AmHost });
+                yield break;
+            }
+            yield return null;
+        }
+    }
+
+    private object GetRoomStatus()
+    {
+        var client = AmongUsClient.Instance;
+        if (!client || !client.AmConnected)
+            throw new InvalidOperationException("A connected room is required.");
+        var gameData = GameData.Instance;
+        var players = new List<object>();
+        if (gameData)
+        {
+            var allPlayers = gameData.AllPlayers;
+            var infos = new List<NetworkedPlayerInfo>();
+            for (int i = 0; i < allPlayers.Count; i++)
+                if (allPlayers[i]) infos.Add(allPlayers[i]);
+            foreach (var info in infos.OrderBy(info => info.ClientId).ThenBy(info => info.PlayerId))
+            {
+                var control = info.Object;
+                var clientData = client.GetClient(info.ClientId);
+                var outfits = new List<object>();
+                string? defaultName = null;
+                foreach (PlayerOutfitType outfitType in Enum.GetValues<PlayerOutfitType>())
+                {
+                    if (!info.Outfits.TryGetValue(outfitType, out var outfit) || outfit == null) continue;
+                    if (outfitType == PlayerOutfitType.Default) defaultName = outfit.PlayerName;
+                    outfits.Add(new { type = outfitType.ToString(), playerName = outfit.PlayerName,
+                        colorId = outfit.ColorId, hatId = outfit.HatId, petId = outfit.PetId,
+                        skinId = outfit.SkinId, visorId = outfit.VisorId, namePlateId = outfit.NamePlateId,
+                        hatSequenceId = outfit.HatSequenceId, petSequenceId = outfit.PetSequenceId,
+                        skinSequenceId = outfit.SkinSequenceId, visorSequenceId = outfit.VisorSequenceId,
+                        namePlateSequenceId = outfit.NamePlateSequenceId });
+                }
+                var tasks = new List<object>();
+                if (info.Tasks != null)
+                    for (int i = 0; i < info.Tasks.Count; i++)
+                    {
+                        var task = info.Tasks[i];
+                        if (task != null) tasks.Add(new { id = task.Id, typeId = task.TypeId, complete = task.Complete });
+                    }
+                players.Add(new
+                {
+                    clientId = info.ClientId,
+                    isHost = info.ClientId == client.HostId,
+                    isLocal = info.ClientId == client.ClientId,
+                    puid = string.IsNullOrEmpty(info.Puid) ? clientData?.ProductUserId : info.Puid,
+                    friendCode = string.IsNullOrEmpty(info.FriendCode) ? clientData?.FriendCode : info.FriendCode,
+                    playerId = info.PlayerId,
+                    level = info.PlayerLevel == uint.MaxValue ? clientData?.PlayerLevel : info.PlayerLevel,
+                    outfits,
+                    position = control ? new { x = control.transform.position.x, y = control.transform.position.y,
+                        z = control.transform.position.z } : null,
+                    roleType = info.RoleType.ToString(),
+                    isDead = info.IsDead,
+                    playerInfo = new { playerName = defaultName ?? clientData?.PlayerName, netId = info.NetId, disconnected = info.Disconnected,
+                        wasEjected = info.WasEjected, isIncomplete = info.IsIncomplete,
+                        roleWhenAlive = info.RoleWhenAlive.HasValue ? info.RoleWhenAlive.Value.ToString() : null,
+                        tasks,
+                        currentOutfitType = control ? control.CurrentOutfitType.ToString() : null,
+                        clientReady = clientData?.IsReady, inScene = clientData?.InScene,
+                        platform = clientData?.PlatformData?.Platform.ToString() }
+                });
+            }
+        }
+        return new { gameId = client.GameId, gameCode = GameCode.IntToGameName(client.GameId),
+            gameState = client.GameState.ToString(), server = DestroyableSingleton<ServerManager>.InstanceExists
+                ? DestroyableSingleton<ServerManager>.Instance.CurrentRegion?.Name : null,
+            hostClientId = client.HostId, localClientId = client.ClientId, playerInfoReady = (bool)gameData,
+            playerCount = players.Count, players };
     }
 
     private object GetAccountInfo(bool includeToken)
