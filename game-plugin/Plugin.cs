@@ -13,7 +13,6 @@ using BepInEx.Unity.IL2CPP.Utils.Collections;
 using Hazel;
 using Il2CppInterop.Runtime;
 using InnerNet;
-using Microsoft.CodeAnalysis.Scripting;
 using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -767,7 +766,7 @@ public sealed class BridgeBehaviour : MonoBehaviour
         var compilation = Task.Run(() => ScriptCompiler.Compile(code, typeof(ScriptGlobals),
             AppDomain.CurrentDomain.GetAssemblies(), "System", "System.Linq", "System.Threading.Tasks", "UnityEngine", "InnerNet"));
         while (!compilation.IsCompleted) yield return null;
-        ScriptRunner<object?> runner = compilation.GetAwaiter().GetResult();
+        var runner = compilation.GetAwaiter().GetResult();
         using var context = new UnityThreadContext(() => IsWorkCancelled(work));
         scriptContext = context;
         try

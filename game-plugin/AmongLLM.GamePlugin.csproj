@@ -7,6 +7,9 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <SelfContained>false</SelfContained>
+    <DebugType>embedded</DebugType>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
   </PropertyGroup>
   <ItemGroup Condition="'$(LocalAmongUsPath)' != ''">
     <Reference Include="$(LocalAmongUsPath)/BepInEx/interop/*.dll" Private="false" />
@@ -27,5 +30,20 @@
   </ItemGroup>
   <Target Name="RequireLocalAmongUsPath" BeforeTargets="ResolveReferences" Condition="'$(LocalAmongUsPath)' == ''">
     <Error Text="Build with -p:LocalAmongUsPath=D:\Game\20260929 to use the installed game interop assemblies." />
+  </Target>
+  <!-- Embed only private NuGet runtime assemblies. Framework assemblies and
+       BepInEx/game references are supplied by the .NET 6 game host. -->
+  <Target Name="EmbedPluginDependencies" AfterTargets="ResolveReferences" BeforeTargets="AssignTargetPaths">
+    <ItemGroup>
+      <EmbeddedResource Include="@(ReferenceCopyLocalPaths)" Condition="'%(ReferenceCopyLocalPaths.Extension)' == '.dll' and '%(ReferenceCopyLocalPaths.NuGetPackageId)' != '' and '%(ReferenceCopyLocalPaths.DestinationSubDirectory)' == ''">
+        <LogicalName>AmongLLM.Dependencies.%(Filename)%(Extension)</LogicalName>
+      </EmbeddedResource>
+      <ReferenceCopyLocalPaths Remove="@(ReferenceCopyLocalPaths)" />
+    </ItemGroup>
+  </Target>
+  <Target Name="PublishPluginDllOnly" AfterTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(ResolvedFileToPublish.RelativePath)' != '$(TargetFileName)'" />
+    </ItemGroup>
   </Target>
 </Project>

@@ -8,8 +8,6 @@
     <RollForward>LatestPatch</RollForward>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../AmongLLM.GamePlugin.csproj" />
-    <Compile Include="../ScriptCompiler.cs" Link="ScriptCompiler.cs" />
     <Compile Include="../UnityThreadContext.cs" Link="UnityThreadContext.cs" />
   </ItemGroup>
 </Project>

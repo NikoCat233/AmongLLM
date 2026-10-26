@@ -11,12 +11,12 @@ if (-not (Test-Path -LiteralPath (Join-Path $GamePath 'BepInEx/interop/Assembly-
 if (-not $SkipTests) {
     Invoke-Dotnet -Arguments @('test', (Join-Path $root 'mcp-server/tests/tests.csproj'), '-c', 'Release', '-v:minimal')
     Invoke-Dotnet -Arguments @('test', (Join-Path $root 'game-plugin/tests/AmongLLM.GamePlugin.Transport.Tests.csproj'), '-c', 'Release', '-v:minimal')
-    Invoke-Dotnet -Arguments @('run', '--project', (Join-Path $root 'game-plugin/runtime-smoke/runtime-smoke.csproj'), '-c', 'Release', "-p:LocalAmongUsPath=$GamePath")
 }
 $output = Join-Path $root 'artifacts'
 $serverOutput = Join-Path $output 'mcp-server'
 $modOutput = Join-Path $output 'game-plugin/BepInEx/plugins/AmongLLM'
-foreach ($destination in @($serverOutput, (Join-Path $output 'game-plugin'))) {
+$smokeOutput = Join-Path $output 'runtime-smoke'
+foreach ($destination in @($serverOutput, (Join-Path $output 'game-plugin'), $smokeOutput)) {
     $absolute = [IO.Path]::GetFullPath($destination)
     $allowedRoot = [IO.Path]::GetFullPath($output).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
     if (-not $absolute.StartsWith($allowedRoot, [StringComparison]::OrdinalIgnoreCase)) { throw "Output is outside artifacts: $absolute" }
@@ -27,8 +27,20 @@ foreach ($destination in @($serverOutput, (Join-Path $output 'game-plugin'))) {
     }
 }
 Invoke-Dotnet -Arguments @('publish', (Join-Path $root 'mcp-server/mcp-server.csproj'), '-c', 'Release', '--no-self-contained', '-o', $serverOutput, '-v:minimal')
-Invoke-Dotnet -Arguments @('publish', (Join-Path $root 'game-plugin/AmongLLM.GamePlugin.csproj'), '-c', 'Release', "-p:LocalAmongUsPath=$GamePath", '-o', $modOutput, '-v:minimal')
+Invoke-Dotnet -Arguments @('publish', (Join-Path $root 'game-plugin/AmongLLM.GamePlugin.csproj'), '-c', 'Release', '-f', 'net6.0', '--no-self-contained', "-p:LocalAmongUsPath=$GamePath", '-o', $modOutput, '-v:minimal')
+$pluginDll = Join-Path $modOutput 'AmongLLM.GamePlugin.dll'
+$pluginFiles = @(Get-ChildItem -LiteralPath $modOutput -Recurse -File)
+if ($pluginFiles.Count -ne 1 -or $pluginFiles[0].FullName -ne $pluginDll) {
+    throw 'Game plugin publish must contain exactly AmongLLM.GamePlugin.dll.'
+}
+if (-not $SkipTests) {
+    # A separate host with no Roslyn/package references tests the actual single
+    # published DLL, rather than accidentally using loose compiler assemblies.
+    Invoke-Dotnet -Arguments @('publish', (Join-Path $root 'game-plugin/runtime-smoke/runtime-smoke.csproj'), '-c', 'Release', '--no-self-contained', '-o', $smokeOutput, '-v:minimal')
+    Invoke-Dotnet -Arguments @((Join-Path $smokeOutput 'runtime-smoke.dll'), $pluginDll)
+}
 Copy-Item -LiteralPath (Join-Path $root 'game-plugin/README.md') -Destination (Join-Path $output 'game-plugin/README.md')
 Compress-Archive -Path (Join-Path $output 'game-plugin/BepInEx'), (Join-Path $output 'game-plugin/README.md') -DestinationPath (Join-Path $output 'AmongLLM-game-plugin.zip') -Force
 Write-Host "Server: $serverOutput"
+Write-Host "Game mod DLL (.NET 6): $pluginDll"
 Write-Host "Game mod package: $(Join-Path $output 'AmongLLM-game-plugin.zip')"
