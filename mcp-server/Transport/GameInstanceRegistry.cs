@@ -277,11 +277,12 @@ public sealed class GameInstanceRegistry(ILogger<GameInstanceRegistry> logger)
             });
             logger.LogInformation(
                 isReconnect ? ServerLogEvents.GameInstanceReconnected : ServerLogEvents.GameInstanceRegistered,
-                "Game instance {InstanceId} (PID {ProcessId}) {Outcome} after {ElapsedMs} ms; resultSummary={ResultSummary}.",
+                "Game instance {InstanceId} (PID {ProcessId}) {Outcome} after {ElapsedMs} ms; workingDirectory={WorkingDirectory}; resultSummary={ResultSummary}.",
                 connection.InstanceId,
                 connection.ProcessId,
                 isReconnect ? "reconnected" : "registered",
                 Math.Round(acceptedAt.Elapsed.TotalMilliseconds, 3),
+                ServerLogSummary.SanitizeText(connection.WorkingDirectory),
                 $"capabilities={connection.Capabilities.Length}; gameVersion={ServerLogSummary.SanitizeText(connection.GameVersion)}; modVersion={ServerLogSummary.SanitizeText(connection.ModVersion)}");
             await connection.SendAsync(new
             {

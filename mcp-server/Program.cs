@@ -19,14 +19,14 @@ await bound.App.WaitForShutdownAsync();
 
 static WebApplication BuildApp(string[] args, int port)
 {
-    var builder = WebApplication.CreateBuilder(args);
-    builder.Logging.ClearProviders();
-    builder.Logging.AddJsonConsole(options =>
+    var builder = WebApplication.CreateBuilder(new WebApplicationOptions
     {
-        options.TimestampFormat = "O";
-        options.UseUtcTimestamp = true;
-        options.IncludeScopes = true;
+        Args = args,
+        ContentRootPath = AppContext.BaseDirectory
     });
+    builder.Logging.ClearProviders();
+    builder.Logging.AddConsole(options => options.FormatterName = ServerConsoleFormatter.FormatterName)
+        .AddConsoleFormatter<ServerConsoleFormatter, Microsoft.Extensions.Logging.Console.ConsoleFormatterOptions>();
     builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, port));
     builder.Services.AddSingleton<GameInstanceRegistry>();
     builder.Services.AddMcpServer()

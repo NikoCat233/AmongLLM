@@ -73,7 +73,9 @@ Typed fields support `bool`, `byte`, `sbyte`, `int16`, `uint16`, `int32`, `uint3
 
 ## Server logs
 
-The server writes structured JSON console logs with UTC ISO 8601 timestamps and scopes. Stable event names cover startup, port fallback, WebSocket acceptance, registration/reconnection/disconnection, and command queue/send/completion/error/timeout/cancellation/transport failures. Command events include the instance, process, command ID, operation, elapsed time, outcome, and bounded payload/result summaries. Payload summaries show only property shapes and counts; credential-shaped fields, code and message contents, byte values, screenshot data, game log entries, and arbitrary inspection results are omitted or redacted.
+The server writes readable console logs as `[HH:mm:ss] [Level] message`, using local time and omitting category names, event IDs, and duplicate scopes. Each line of a multiline message or exception has the same prefix. .NET framework and MCP library logs default to Warning and above, hiding routine hosting and request messages while retaining diagnostics. These levels can be adjusted in `appsettings.json` beside the server assembly; configuration is loaded from that directory regardless of the working directory used to launch the server.
+
+Application logs cover startup, port fallback, WebSocket acceptance, registration/reconnection/disconnection, and command queue/send/completion/error/timeout/cancellation/transport failures. Command events include the instance, process, command ID, operation, elapsed time, outcome, and bounded payload/result summaries. Payload summaries show only property shapes and counts; credential-shaped fields, code and message contents, byte values, screenshot data, game log entries, and arbitrary inspection results are omitted or redacted.
 
 The Itch account tool passes the token through the bridge without server-side logging. `execute_csharp` executes code inside the game process and can read credentials, hang, or crash that process. Use it only with trusted snippets.
 
