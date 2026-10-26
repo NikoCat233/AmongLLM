@@ -32,6 +32,7 @@ public sealed class Plugin : BasePlugin
 
     public override void Load()
     {
+        RuntimeLogs.Install();
         RuntimeInfo.PlatformType = Constants.GetPlatformType().ToString();
         RuntimeInfo.GameVersion = Application.version;
         AddComponent<BridgeBehaviour>();
@@ -80,6 +81,7 @@ public sealed class BridgeBehaviour : MonoBehaviour
         Application.runInBackground = originalRunInBackground;
         socketClient?.Stop();
         socketClient = null;
+        RuntimeLogs.Shutdown();
     }
 
     public void Update()
@@ -212,6 +214,9 @@ public sealed class BridgeBehaviour : MonoBehaviour
                 return RunClickSequence(work, setResult);
             case "set_text":
                 setResult(SetText(p));
+                return null;
+            case "read_game_logs":
+                setResult(RuntimeLogs.Read(p));
                 return null;
             case "get_account_info":
                 setResult(GetAccountInfo(GetBool(p, "includeUserIdToken")));

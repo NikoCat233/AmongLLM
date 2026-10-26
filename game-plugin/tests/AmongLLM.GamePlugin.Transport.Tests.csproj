@@ -17,6 +17,7 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="../../mcp-server/mcp-server.csproj" />
     <Compile Include="..\SocketClient.cs" Link="SocketClient.cs" />
+    <Compile Include="..\GameLogBuffer.cs" Link="GameLogBuffer.cs" />
     <Compile Include="..\PropertyPath.cs" Link="PropertyPath.cs" />
     <Compile Include="..\UnityThreadContext.cs" Link="UnityThreadContext.cs" />
   </ItemGroup>

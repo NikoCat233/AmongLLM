@@ -130,7 +130,7 @@ internal sealed class SocketClient
             "capture_screenshot", "get_game_status", "get_screen", "click_button", "click_sequence",
             "get_account_info", "set_itch_auth_token_and_login", "send_chat_message", "send_hazel_message",
             "snap_to", "list_net_objects", "read_net_object_properties", "write_net_object_property",
-            "execute_csharp", "list_loaded_mods", "send_rpc", "set_text"
+            "execute_csharp", "list_loaded_mods", "send_rpc", "read_game_logs", "set_text"
         }
     }, Json);
 
