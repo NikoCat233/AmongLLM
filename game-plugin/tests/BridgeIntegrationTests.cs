@@ -24,7 +24,8 @@ public sealed class BridgeIntegrationTests
         builder.Logging.ClearProviders();
         builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
         builder.Services.AddSingleton<GameInstanceRegistry>();
-        builder.Services.AddMcpServer().WithHttpTransport().WithTools<GameTools>();
+        builder.Services.AddMcpServer().WithHttpTransport().WithTools<GameTools>()
+            .WithEmptyResourceDiscovery();
         await using var app = builder.Build();
         app.UseWebSockets();
         app.MapGet("/healthz", (HttpContext ctx) => Results.Json(new { service = "AmongLLM", protocolVersion = 1, serverId = ServiceIdentity.Id, port = ctx.Connection.LocalPort }));
@@ -57,9 +58,34 @@ public sealed class BridgeIntegrationTests
             initResponse.EnsureSuccessStatusCode();
             if (initResponse.Headers.TryGetValues("Mcp-Session-Id", out var sessions)) http.DefaultRequestHeaders.Add("Mcp-Session-Id", sessions.Single());
             using var init = ReadRpc(await initResponse.Content.ReadAsStringAsync());
+            var capabilities = init.RootElement.GetProperty("result").GetProperty("capabilities");
+            Assert.True(capabilities.TryGetProperty("tools", out _));
+            var resourcesCapability = capabilities.GetProperty("resources");
+            Assert.False(resourcesCapability.TryGetProperty("subscribe", out var subscribe) && subscribe.GetBoolean());
+            Assert.False(resourcesCapability.TryGetProperty("listChanged", out var listChanged) && listChanged.GetBoolean());
             http.DefaultRequestHeaders.Add("MCP-Protocol-Version", init.RootElement.GetProperty("result").GetProperty("protocolVersion").GetString());
             using var ready = await http.PostAsJsonAsync("/mcp", new { jsonrpc = "2.0", method = "notifications/initialized" });
             ready.EnsureSuccessStatusCode();
+            // Repeat discovery in the same session, as Codex does when refreshing an MCP connection.
+            for (var discovery = 0; discovery < 2; discovery++)
+            {
+                foreach (var (method, property) in new[]
+                {
+                    ("resources/list", "resources"),
+                    ("resources/templates/list", "resourceTemplates")
+                })
+                {
+                    var requestId = $"{method}-{discovery}";
+                    using var response = await http.PostAsJsonAsync("/mcp", new { jsonrpc = "2.0", id = requestId, method });
+                    response.EnsureSuccessStatusCode();
+                    using var rpc = ReadRpc(await response.Content.ReadAsStringAsync());
+                    Assert.Equal(requestId, rpc.RootElement.GetProperty("id").GetString());
+                    Assert.False(rpc.RootElement.TryGetProperty("error", out _));
+                    var page = rpc.RootElement.GetProperty("result");
+                    Assert.Empty(page.GetProperty(property).EnumerateArray());
+                    Assert.False(page.TryGetProperty("nextCursor", out _));
+                }
+            }
             using var toolsResponse = await http.PostAsJsonAsync("/mcp", new { jsonrpc = "2.0", id = 2, method = "tools/list" });
             toolsResponse.EnsureSuccessStatusCode();
             using var tools = ReadRpc(await toolsResponse.Content.ReadAsStringAsync());

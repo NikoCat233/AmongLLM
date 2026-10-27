@@ -15,6 +15,8 @@ The server binds only to loopback. It tries `127.0.0.1:26767` first and falls ba
 
 Register an HTTP MCP server at either `http://127.0.0.1:26767/mcp` or `http://127.0.0.1:26768/mcp`, depending on the startup message.
 
+The initialization response advertises tools and resources. The server currently exposes game operations through tools and has no MCP resources or resource templates: `resources/list` returns `{"resources":[]}` and `resources/templates/list` returns `{"resourceTemplates":[]}`, with no pagination cursor. The SDK handles these discovery requests normally when Codex adds or refreshes the connection; resource subscriptions and list-change notifications are not advertised. See the [Codex MCP documentation](https://developers.openai.com/codex/mcp/) and [OpenAI MCP server guide](https://developers.openai.com/plugins/build/mcp-server).
+
 ## Game bridge protocol v1
 
 The first WebSocket frame must be a JSON registration:

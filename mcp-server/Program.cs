@@ -35,7 +35,8 @@ static WebApplication BuildApp(string[] args, int port)
     builder.Services.AddSingleton<GameInstanceRegistry>();
     builder.Services.AddMcpServer()
         .WithHttpTransport()
-        .WithTools<GameTools>();
+        .WithTools<GameTools>()
+        .WithEmptyResourceDiscovery();
 
     var app = builder.Build();
     app.UseWebSockets();
