@@ -1,0 +1,380 @@
+
+AmongLLM Noncommercial Copyleft License
+Version 1.0
+
+Copyright (c) 2026 NikoCat233. All rights reserved.
+
+
+PLAIN-LANGUAGE SUMMARY
+======================
+
+This software is source-available, NOT open-source under the
+Open Source Initiative (OSI) definition.
+
+The following restrictions apply:
+
+1. NO COMMERCIAL USE
+   Commercial use of AmongLLM or its derivative works is
+   strictly prohibited without prior written permission.
+
+2. NO CLOSED-SOURCE DISTRIBUTION
+   Distribution of AmongLLM or its derivative works without
+   providing the corresponding source code is prohibited.
+   Distributed derivative works must remain under this License.
+
+3. EXCLUDED PERSONS AND ENTITIES
+   The individuals or entities operating the following GitHub
+   accounts are explicitly prohibited from using AmongLLM:
+
+   - https://github.com/Gurge44
+   - https://github.com/ZypherusKhan
+
+4. EXCLUDED PROJECT AND ALL ITS FORKS
+   Use of AmongLLM in, for, or in connection with the following
+   project, including all its forks, mirrors, successors,
+   and derivative projects, is explicitly prohibited:
+
+   - https://github.com/Gurge44/EndlessHostRoles
+
+These restrictions apply regardless of repository ownership,
+project renaming, or redistribution by third parties.
+
+This summary is provided for convenience only.
+The full license terms below are legally controlling.
+
+
+FULL LICENSE TERMS
+==================
+
+1. DEFINITIONS
+
+"Licensor" means NikoCat233, to the extent the Licensor owns
+or is authorized to license copyright in the Covered Work.
+
+"Covered Work" means the original AmongLLM software, its source
+code, documentation, and copyrightable portions licensed by the
+Licensor under this License, including subsequent versions
+carrying this License notice.
+
+It does not include Third-Party Materials as defined in Section 9.
+
+"Derivative Work" means a copyrightable adaptation or modification
+of the Covered Work, including a work incorporating protected
+portions of it, to the extent permission from the Licensor is
+required by applicable copyright law.
+
+Mere interoperability, use of a documented protocol, or
+independent creation does not by itself constitute a Derivative
+Work.
+
+"Corresponding Source" means the preferred form for making
+modifications to the Covered Work or Derivative Work, together
+with build and installation scripts and the material necessary
+to reproduce the distributed executable.
+
+It excludes generally available system components and
+independently licensed Third-Party Materials that are not part
+of the licensable Covered Work.
+
+"Distribute" means to convey, publish, transfer, or otherwise
+make copies available to another party, except solely executing
+a program over a network.
+
+"Network Service" means a deployed Covered Work or Derivative
+Work whose functionality is made available to users through
+a network, including a hosted MCP service or another
+network-accessible interface.
+
+"Commercial Use" means any use principally intended for or
+directed toward commercial advantage, business operations,
+financial compensation, or monetary gain, directly or indirectly.
+
+This includes, without limitation:
+
+- Use in a for-profit business's internal operations;
+- Paid products, subscriptions, hosting, or consulting;
+- Monetized applications or content;
+- Advertising-funded services;
+- Use in developing, operating, or supporting commercial
+  products or services.
+
+Recovery of reasonable, documented distribution costs alone,
+without profit or other commercial advantage, is not
+Commercial Use.
+
+"Excluded Parties" and "Excluded Project" have the meanings
+established in Section 3.
+
+
+2. LIMITED NONCOMMERCIAL LICENSE
+
+Subject to every condition and exclusion in this License,
+the Licensor grants each eligible recipient a worldwide,
+nonexclusive, royalty-free license, revocable upon breach
+and lasting for the duration of the applicable copyright,
+to use, reproduce, study, modify, and Distribute the
+Covered Work and Derivative Works solely for Noncommercial Use.
+
+No permission for Commercial Use is granted.
+
+Any Commercial Use requires a separate express written
+agreement from the Licensor.
+
+Public availability, access to source code, or a third party's
+distribution does not constitute such permission.
+
+
+3. EXPRESS EXCLUSIONS: PARTIES AND PROJECTS
+
+No license or permission is granted by this document to the
+following parties, whether acting directly, through controlled
+accounts, agents, employees, contractors, or entities acting
+on their behalf:
+
+(a) The individual or entity operating the GitHub account:
+
+    https://github.com/Gurge44
+
+    GitHub username: Gurge44
+
+(b) The individual or entity operating the GitHub account:
+
+    https://github.com/ZypherusKhan
+
+    GitHub username: ZypherusKhan
+
+This exclusion identifies the account operators at the time
+this License is issued.
+
+A username change alone does not eliminate the exclusion.
+
+An unrelated future account holder is not automatically
+excluded solely by acquiring a reassigned username.
+
+
+3.1 EXCLUDED PROJECT
+
+In addition, no permission is granted for any use of the
+Covered Work or any Derivative Work in, for, or in connection
+with the project located at:
+
+https://github.com/Gurge44/EndlessHostRoles
+
+Hereinafter referred to as the "Excluded Project".
+
+This restriction explicitly includes:
+
+- The original Excluded Project;
+- Every fork of the Excluded Project;
+- Mirrors and copies of the Excluded Project;
+- Renamed or relocated repositories;
+- Successor projects derived from the Excluded Project;
+- Modified versions and derivative distributions;
+- Projects incorporating protected portions of the Excluded
+  Project, to the extent they remain identifiable as derived
+  from it.
+
+These restrictions apply regardless of the identity of the
+maintainer, owner, contributor, distributor, or hosting platform.
+
+The project restriction applies to any person or entity
+performing the restricted use, even if that person or entity
+is not an Excluded Party.
+
+These exclusions prohibit copying, modifying, incorporating,
+Distributing, running, or making the Covered Work available
+as part of the excluded uses, to the extent the Licensor's
+permission would otherwise be legally required.
+
+These restrictions do not assert copyright over the Excluded
+Project itself.
+
+They do not prohibit independently created code that does
+not use protected portions of the Covered Work.
+
+Nothing here overrides rights that cannot lawfully be
+restricted or valid permissions previously granted under
+a different license.
+
+
+4. NONCLOSED DISTRIBUTION AND SHARE-ALIKE
+
+If you Distribute the Covered Work or a Derivative Work,
+you must comply with all of the following requirements.
+
+(a) SAME LICENSE
+
+You must license the Covered Work and all copyrightable
+portions of the Derivative Work for which you hold the
+necessary rights under this same License.
+
+You may not impose additional restrictions on recipients'
+rights in those portions.
+
+
+(b) CORRESPONDING SOURCE CODE
+
+You must provide recipients with the complete Corresponding
+Source at no additional charge.
+
+The source code must be provided either:
+
+- Alongside the distribution; or
+- Through a durable, publicly accessible download location
+  identified prominently with the distribution.
+
+
+(c) COPYRIGHT AND ATTRIBUTION
+
+You must retain all applicable copyright notices,
+attribution notices, warranty disclaimers, and
+license notices.
+
+You must include a complete copy of this License.
+
+
+(d) MODIFICATION NOTICES
+
+You must clearly identify your substantive modifications
+and their dates.
+
+You must not falsely claim authorship or ownership of
+the original Covered Work.
+
+
+(e) NO RESTRICTIONS ON LICENSED RIGHTS
+
+You may not apply digital access controls, contractual
+restrictions, or technological measures that prevent
+recipients from exercising the rights granted under this
+License in the Covered Work and Derivative Work.
+
+You may not Distribute a Covered Work or Derivative Work
+solely in binary, obfuscated, source-unavailable, or
+proprietary form.
+
+This section does not require unrelated independent works
+in a mere aggregate to adopt this License.
+
+
+5. NETWORK SOURCE DISCLOSURE
+
+If you modify the Covered Work and operate the modified
+Covered Work or a Derivative Work as a Network Service,
+you must offer every user who interacts with that service
+a prominent, reasonably accessible way to obtain the
+complete Corresponding Source for the deployed version.
+
+The Corresponding Source must be available:
+
+- At no charge;
+- Under this same License;
+- For as long as that version is provided as a Network Service.
+
+This obligation does not authorize Commercial Use or
+any activity excluded under Section 3.
+
+
+6. NO SUBLICENSING AROUND RESTRICTIONS
+
+You may not relicense protected portions of the Covered Work
+under terms that permit:
+
+- Commercial Use;
+- Closed-source distribution of Derivative Works;
+- Activities involving the Excluded Parties;
+- Activities involving the Excluded Project;
+- Circumvention of the restrictions established herein.
+
+Recipients receive only the permissions, if any, that
+the Licensor grants to them directly through this License.
+
+No intermediary may confer rights that the Licensor withholds.
+
+
+7. BREACH AND TERMINATION
+
+Your rights under this License terminate automatically
+upon violation of its conditions.
+
+A first violation other than one involving a prohibited
+Excluded Party, Excluded Project, or deliberate Commercial
+Use may be cured within 30 days after you receive written
+notice of the violation.
+
+If fully cured, the license is reinstated prospectively.
+
+The Licensor may also reinstate rights expressly in writing.
+
+Termination does not extinguish claims for past violations.
+
+Separate permissions validly granted by the Licensor are
+governed by their own terms.
+
+
+8. OWNERSHIP, PATENTS, AND TRADEMARKS
+
+The Licensor retains all rights not expressly granted.
+
+No trademark rights are granted.
+
+No patent license is expressly granted by this document.
+
+The names "AmongLLM" and "NikoCat233" may be used only
+as reasonably necessary for accurate attribution, not
+to suggest endorsement.
+
+
+9. THIRD-PARTY MATERIALS
+
+Dependencies, frameworks, SDKs, generated interop
+assemblies, game assets, and other materials owned by
+third parties retain their respective copyright
+ownership and license terms.
+
+This License applies only to material the Licensor
+has authority to license.
+
+Where applicable, third-party copyright and license
+notices must be preserved.
+
+Nothing in this License purports to override a third
+party's independently granted rights.
+
+
+10. DISCLAIMER OF WARRANTY AND LIMITATION OF LIABILITY
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW,
+THE COVERED WORK IS PROVIDED "AS IS" WITHOUT WARRANTY
+OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING WARRANTIES
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE,
+TITLE, OR NONINFRINGEMENT.
+
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE LICENSOR
+SHALL NOT BE LIABLE FOR ANY CLAIM, LOSS, OR DAMAGE
+ARISING OUT OF THE COVERED WORK OR ITS USE.
+
+
+11. SEVERABILITY AND RESERVED RIGHTS
+
+If any provision is unenforceable, the remaining
+provisions will remain effective to the extent
+allowed by law, without expanding the license beyond
+the permissions the Licensor intended to grant.
+
+No rights are granted except as expressly stated,
+subject to applicable mandatory legal exceptions
+and limitations.
+
+
+12. SEPARATE PERMISSIONS
+
+Requests for commercial licensing, exceptions, or
+permissions for an Excluded Party or the Excluded Project
+must be addressed to the Licensor and approved in an
+express written agreement.
+
+Silence does not constitute consent.
+
+
+END OF LICENSE
