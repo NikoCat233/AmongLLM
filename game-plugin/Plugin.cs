@@ -13,6 +13,7 @@ using BepInEx.Unity.IL2CPP;
 using BepInEx.Unity.IL2CPP.Utils.Collections;
 using Hazel;
 using Il2CppInterop.Runtime;
+using Il2CppInterop.Runtime.InteropTypes;
 using InnerNet;
 using TMPro;
 using UnityEngine;
@@ -451,6 +452,11 @@ public sealed class BridgeBehaviour : MonoBehaviour
         var players = new List<object>();
         if (gameData)
         {
+            var roleWhenAliveField = IL2CPP.GetIl2CppField(
+                Il2CppClassPointerStore<NetworkedPlayerInfo>.NativeClassPtr,
+                nameof(NetworkedPlayerInfo.RoleWhenAlive));
+            if (roleWhenAliveField == IntPtr.Zero)
+                throw new InvalidOperationException("RoleWhenAlive field was not found.");
             var allPlayers = gameData.AllPlayers;
             var infos = new List<NetworkedPlayerInfo>();
             for (int i = 0; i < allPlayers.Count; i++)
@@ -459,6 +465,9 @@ public sealed class BridgeBehaviour : MonoBehaviour
             {
                 var control = info.Object;
                 var clientData = client.GetClient(info.ClientId);
+                var boxedRoleWhenAlive = IL2CPP.il2cpp_field_get_value_object(roleWhenAliveField, info.Pointer);
+                string? roleWhenAlive = boxedRoleWhenAlive == IntPtr.Zero ? null
+                    : new Il2CppObjectBase(boxedRoleWhenAlive).Unbox<RoleTypes>().ToString();
                 var outfits = new List<object>();
                 string? defaultName = null;
                 foreach (PlayerOutfitType outfitType in Enum.GetValues<PlayerOutfitType>())
@@ -495,7 +504,7 @@ public sealed class BridgeBehaviour : MonoBehaviour
                     isDead = info.IsDead,
                     playerInfo = new { playerName = defaultName ?? clientData?.PlayerName, netId = info.NetId, disconnected = info.Disconnected,
                         wasEjected = info.WasEjected, isIncomplete = info.IsIncomplete,
-                        roleWhenAlive = info.RoleWhenAlive.HasValue ? info.RoleWhenAlive.Value.ToString() : null,
+                        roleWhenAlive,
                         tasks,
                         currentOutfitType = control ? control.CurrentOutfitType.ToString() : null,
                         clientReady = clientData?.IsReady, inScene = clientData?.InScene,
