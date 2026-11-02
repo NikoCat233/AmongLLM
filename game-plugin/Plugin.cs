@@ -13,6 +13,7 @@ using BepInEx.Unity.IL2CPP;
 using BepInEx.Unity.IL2CPP.Utils.Collections;
 using Hazel;
 using Il2CppInterop.Runtime;
+using Il2CppInterop.Runtime.Attributes;
 using Il2CppInterop.Runtime.InteropTypes;
 using InnerNet;
 using TMPro;
@@ -112,6 +113,8 @@ public sealed class BridgeBehaviour : MonoBehaviour
         }
     }
 
+    // Only Unity lifecycle callbacks need to be exposed to IL2CPP; bridge operations stay managed.
+    [HideFromIl2Cpp]
     private void EnqueueCommand(JsonElement message, SocketSession session)
     {
         if (!message.TryGetProperty("type", out JsonElement type)) return;
@@ -140,6 +143,7 @@ public sealed class BridgeBehaviour : MonoBehaviour
         commands.Enqueue(work);
     }
 
+    [HideFromIl2Cpp]
     private IEnumerator ExecuteWork(CommandWork work)
     {
         object? result = null;
@@ -194,6 +198,7 @@ public sealed class BridgeBehaviour : MonoBehaviour
         }
     }
 
+    [HideFromIl2Cpp]
     private IEnumerator? BuildOperation(CommandWork work, Action<object?> setResult)
     {
         JsonElement p = work.Payload;
@@ -268,6 +273,7 @@ public sealed class BridgeBehaviour : MonoBehaviour
         }
     }
 
+    [HideFromIl2Cpp]
     private IEnumerator CaptureScreenshot(Action<object?> setResult)
     {
         yield return new WaitForEndOfFrame();
@@ -285,6 +291,7 @@ public sealed class BridgeBehaviour : MonoBehaviour
         }
     }
 
+    [HideFromIl2Cpp]
     private object GetGameStatus(bool includeAccountToken)
     {
         AmongUsClient? client = AmongUsClient.Instance;
@@ -352,6 +359,7 @@ public sealed class BridgeBehaviour : MonoBehaviour
             selected, servers = endpoints };
     }
 
+    [HideFromIl2Cpp]
     private object ListGameServers()
     {
         var manager = DestroyableSingleton<ServerManager>.Instance;
@@ -364,6 +372,7 @@ public sealed class BridgeBehaviour : MonoBehaviour
         };
     }
 
+    [HideFromIl2Cpp]
     private object SetGameServer(int serverIndex)
     {
         var regions = GetIndexedRegions();
@@ -387,6 +396,7 @@ public sealed class BridgeBehaviour : MonoBehaviour
             throw new InvalidOperationException("AmongUsClient is not ready.");
     }
 
+    [HideFromIl2Cpp]
     private IEnumerator HostGame(CommandWork work, string modeName, Action<object?> setResult)
     {
         EnsureRoomActionReady();
@@ -412,6 +422,7 @@ public sealed class BridgeBehaviour : MonoBehaviour
         }
     }
 
+    [HideFromIl2Cpp]
     private IEnumerator JoinGame(CommandWork work, string gameCode, Action<object?> setResult)
     {
         EnsureRoomActionReady();
@@ -443,6 +454,7 @@ public sealed class BridgeBehaviour : MonoBehaviour
         }
     }
 
+    [HideFromIl2Cpp]
     private object GetRoomStatus()
     {
         var client = AmongUsClient.Instance;
@@ -519,6 +531,7 @@ public sealed class BridgeBehaviour : MonoBehaviour
             playerCount = players.Count, players };
     }
 
+    [HideFromIl2Cpp]
     private object GetAccountInfo(bool includeToken)
     {
         bool exists = DestroyableSingleton<EOSManager>.InstanceExists;
@@ -548,6 +561,7 @@ public sealed class BridgeBehaviour : MonoBehaviour
         catch { return null; } // Native identity fields may be absent while login initializes.
     }
 
+    [HideFromIl2Cpp]
     private object GetScreen()
     {
         string scene = SceneManager.GetActiveScene().name;
@@ -584,6 +598,7 @@ public sealed class BridgeBehaviour : MonoBehaviour
         return new { screenId = lastScreenId, scene, frame = Time.frameCount, width = Screen.width, height = Screen.height, buttons, inputs, text = textNodes };
     }
 
+    [HideFromIl2Cpp]
     private object SetText(JsonElement payload)
     {
         var screen = JsonSerializer.SerializeToElement(GetScreen());
@@ -603,6 +618,7 @@ public sealed class BridgeBehaviour : MonoBehaviour
         return new { instanceId = id, length = tmp.text.Length, sensitive = tmp.inputType == TMP_InputField.InputType.Password };
     }
 
+    [HideFromIl2Cpp]
     private object ClickButton(JsonElement payload)
     {
         JsonElement selector = GetProperty(payload, "selector") ?? payload;
@@ -618,6 +634,7 @@ public sealed class BridgeBehaviour : MonoBehaviour
         return new { clicked = target.GetInstanceID(), name = target.name, frame = Time.frameCount, screenId = lastScreenId };
     }
 
+    [HideFromIl2Cpp]
     private IEnumerator RunClickSequence(CommandWork work, Action<object?> setResult)
     {
         JsonElement steps = GetProperty(work.Payload, "steps") ?? throw new InvalidOperationException("steps is required.");
@@ -657,6 +674,7 @@ public sealed class BridgeBehaviour : MonoBehaviour
         setResult(new { completedSteps = completed, totalSteps = steps.GetArrayLength(), frame = Time.frameCount });
     }
 
+    [HideFromIl2Cpp]
     private IEnumerator SetItchTokenAndLogin(string token, string? birthDate, Action<object?> setResult)
     {
         if (string.IsNullOrWhiteSpace(token) || token.Length > 8192) throw new InvalidOperationException("platformAuthToken is required and must be at most 8192 characters.");
@@ -709,6 +727,7 @@ public sealed class BridgeBehaviour : MonoBehaviour
         if (!string.Equals(eos.platformAuthToken, token, StringComparison.Ordinal)) throw new InvalidOperationException("The Itch platformAuthToken field did not match after native write.");
     }
 
+    [HideFromIl2Cpp]
     private object SendChatMessage(string text)
     {
         if (string.IsNullOrWhiteSpace(text) || text.Length > MaxStringLength) throw new InvalidOperationException("text must contain 1 to 8192 characters.");
@@ -717,6 +736,7 @@ public sealed class BridgeBehaviour : MonoBehaviour
         return new { accepted = local.RpcSendChat(text) };
     }
 
+    [HideFromIl2Cpp]
     private object SendHazelMessage(JsonElement payload)
     {
         string mode = GetStringOr(payload, "mode", "raw");
@@ -745,6 +765,7 @@ public sealed class BridgeBehaviour : MonoBehaviour
         _ => throw new InvalidOperationException("sendOption must be Reliable or Unreliable.")
     };
 
+    [HideFromIl2Cpp]
     private object SendRpc(JsonElement payload)
     {
         AmongUsClient client = AmongUsClient.Instance;
@@ -840,6 +861,7 @@ public sealed class BridgeBehaviour : MonoBehaviour
         }
     }
 
+    [HideFromIl2Cpp]
     private object SnapTo(JsonElement payload)
     {
         AmongUsClient client = AmongUsClient.Instance;
@@ -866,6 +888,7 @@ public sealed class BridgeBehaviour : MonoBehaviour
         return new { accepted = true, playerId = target.PlayerId, netId = target.NetId, x, y, host = client.AmHost };
     }
 
+    [HideFromIl2Cpp]
     private object ListNetObjects()
     {
         AmongUsClient? client = AmongUsClient.Instance;
@@ -876,6 +899,7 @@ public sealed class BridgeBehaviour : MonoBehaviour
         return new { host = isHost, count = items.Length, objects = items };
     }
 
+    [HideFromIl2Cpp]
     private object ReadNetObjectProperties(JsonElement payload)
     {
         InnerNetObject target = FindNetObject(GetUInt(payload, "netObjectId"));
@@ -898,6 +922,7 @@ public sealed class BridgeBehaviour : MonoBehaviour
         return new { netId = target.NetId, type = target.GetType().FullName, properties = values };
     }
 
+    [HideFromIl2Cpp]
     private object WriteNetObjectProperty(JsonElement payload)
     {
         InnerNetObject target = FindNetObject(GetUInt(payload, "netObjectId"));
@@ -994,6 +1019,7 @@ public sealed class BridgeBehaviour : MonoBehaviour
         return new { type = value.GetType().FullName, value = value.ToString() };
     }
 
+    [HideFromIl2Cpp]
     private IEnumerator ExecuteCSharp(CommandWork work, Action<object?> setResult)
     {
         string code = GetString(work.Payload, "code");
@@ -1015,6 +1041,7 @@ public sealed class BridgeBehaviour : MonoBehaviour
         finally { scriptContext = null; }
     }
 
+    [HideFromIl2Cpp]
     private object ListLoadedMods()
     {
         var plugins = IL2CPPChainloader.Instance.Plugins.Values.Select(info => new
